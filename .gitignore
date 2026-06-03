@@ -1,0 +1,21 @@
+# Build artifacts
+*.class
+*.jar
+!src/lib/*.jar
+build/
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PowerShell build script (local only)
+make.ps1

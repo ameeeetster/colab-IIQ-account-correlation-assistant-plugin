@@ -1,0 +1,94 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<sailpoint>
+
+  <!--
+      Sent to the matched identity's line manager when an admin requests
+      their approval before correlating an orphan account.
+
+      Variables provided by Workflow-OrphanCorrelationApproval (Manager
+      Approval step, via the workItemNotificationTemplate Arg):
+        nativeIdentity, applicationName, identityName, identityDisplayName,
+        strategy, confidence, matchDetail
+  -->
+  <EmailTemplate name="Orphan Correlation Approval Request">
+    <Description>
+      Sent to the line manager of a matched identity when an admin requests
+      their approval before correlating an orphan account.
+    </Description>
+    <!-- No <From> — IIQ uses the system sender configured in Global Settings → Notifications -->
+    <Subject>Action Required: Orphan Account Correlation Approval for ${orcIdentityDisplay}</Subject>
+    <Body><![CDATA[
+Hello,
+
+An IdentityIQ administrator has asked you to approve linking an uncorrelated
+account to one of your direct reports. Nothing is changed until you approve.
+
+==================================================
+ ACCOUNT TO BE LINKED
+==================================================
+ Orphan account : ${orcNativeIdentity}
+ Application    : ${orcApplicationName}
+
+==================================================
+ SUGGESTED IDENTITY
+==================================================
+ Name           : ${orcIdentityDisplay}
+ Login          : ${orcIdentityName}
+
+==================================================
+ MATCH CONFIDENCE
+==================================================
+ Score          : ${orcScore} / 100
+ Reason         : ${orcMatchDetail}
+
+--------------------------------------------------
+ WHAT TO DO
+--------------------------------------------------
+ 1. Log in to IdentityIQ.
+ 2. Go to My Work  >  Approvals.
+ 3. Open this request. The full account details (status, last login and
+    sample access) are shown on the work item.
+ 4. Approve to link the account to ${orcIdentityDisplay}, or Reject if it
+    does not belong to them.
+
+The account is linked ONLY after you approve. If you reject, nothing changes.
+
+This is an automated message from the Orphan Account Correlator.]]></Body>
+  </EmailTemplate>
+
+  <!--
+      Sent to the admin who initiated the approval request, after the
+      manager has approved or rejected. Variables provided by the
+      Notify Admin step in the workflow.
+  -->
+  <EmailTemplate name="Orphan Correlation Result">
+    <Description>
+      Sent to the requesting admin after the manager approves or rejects
+      an orphan account correlation request.
+    </Description>
+    <!-- No <From> — IIQ uses the system sender configured in Global Settings → Notifications -->
+    <Subject>Orphan Correlation ${decision}: ${nativeIdentity} -- ${identityDisplayName}</Subject>
+    <Body><![CDATA[
+Hello ${adminDisplayName},
+
+A manager has responded to your orphan account correlation approval request.
+
+--- Summary ---
+Account:          ${nativeIdentity}
+Matched Identity: ${identityDisplayName}
+Match Score:      ${score}/100
+Decision:         ${decision}
+Manager Comment:  ${comments}
+
+--- Outcome ---
+${outcome}
+
+If the decision was REJECTED, the account remains uncorrelated and you
+may wish to investigate further.
+
+This is an automated notification from the Orphan Account Correlator.
+    ]]></Body>
+  </EmailTemplate>
+
+</sailpoint>

@@ -1,0 +1,608 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:h="http://java.sun.com/jsf/html"
+      xmlns:ui="http://java.sun.com/jsf/facelets">
+<h:head>
+  <title>Orphan Account Correlator</title>
+     <link rel="stylesheet" type="text/css"
+           href="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/css/correlator.css?v=1_0_0"/>
+</h:head>
+<h:body>
+<div ng-controller="OrphanCorrelatorCtrl" id="orc-root">
+
+  <div class="orc-header">
+    <div class="orc-header-icon"><i class="fa fa-random"></i></div>
+    <div class="orc-header-text">
+      <div class="orc-header-titlerow">
+        <h1>Orphan Account Correlator</h1>
+        <span class="orc-tag">Manual Correlation</span>
+      </div>
+      <p>Identify and manually correlate uncorrelated accounts on any application</p>
+    </div>
+  </div>
+
+  <div class="orc-card orc-scan-card" ng-if="!scanRun">
+    <div class="orc-card-head">
+      <h2 class="orc-card-title">Scan Application</h2>
+      <p class="orc-card-sub">Select an application to find orphan accounts that require manual correlation.</p>
+    </div>
+    <div class="orc-card-body">
+
+      <!-- Application selector + orphan-count badge -->
+      <div class="orc-field">
+        <label for="orc-app-select" class="orc-field-label">Application</label>
+        <div class="orc-field-control">
+          <select id="orc-app-select"
+                  class="form-control"
+                  ng-model="selectedApp"
+                  ng-change="setSelectedApp(selectedApp)"
+                  ng-disabled="scanning || appsLoading"
+                  ng-options="a.name as (a.name + ' - ' + a.orphanCount + ' orphan' + (a.orphanCount===1?'':'s')) for a in applications | orderBy:'-orphanCount'">
+            <option value="">-- Select an application --</option>
+          </select>
+          <span class="orc-orphan-badge" ng-if="selectedApp">{{ selectedAppOrphans() }} orphans</span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="orc-actions">
+        <button type="button"
+                class="btn btn-primary"
+                ng-click="runScan()"
+                ng-disabled="scanning || !selectedApp">
+          <i class="fa" ng-class="scanning ? 'fa-spinner fa-spin' : 'fa-search'"></i>
+          {{ scanning ? ' Scanning...' : ' Scan' }}
+        </button>
+        <button type="button"
+                class="btn btn-default"
+                ng-click="loadApplications()"
+                ng-disabled="appsLoading || scanning"
+                title="Reload applications and refresh orphan counts">
+          <i class="fa" ng-class="appsLoading ? 'fa-spinner fa-spin' : 'fa-refresh'"></i> Refresh Applications
+        </button>
+        <span ng-if="appsError" class="text-danger orc-inline-err">
+          <i class="fa fa-exclamation-triangle"></i> {{ appsError }}
+        </span>
+      </div>
+
+      <!-- Chunked scan progress -->
+      <div class="orc-scan-progress" ng-if="scanning">
+        <div class="orc-progress-row">
+          <i class="fa fa-spinner fa-spin"></i>
+          <span>Scanning <strong>{{ lastScannedApp }}</strong>&#8230;
+            {{ scanProgress.done }}<span ng-if="scanProgress.total"> of {{ scanProgress.total }}</span> account(s)</span>
+          <button type="button" class="btn btn-default btn-xs orc-scan-stop"
+                  ng-click="cancelScan()" ng-disabled="scanCancel">
+            <i class="fa fa-stop"></i> {{ scanCancel ? ' Stopping&#8230;' : ' Stop' }}
+          </button>
+        </div>
+        <div class="orc-progress-track" ng-if="scanProgress.total">
+          <div class="orc-progress-bar"
+               ng-style="{width: (scanProgress.total ? (scanProgress.done*100/scanProgress.total) : 0) + '%'}"></div>
+        </div>
+      </div>
+
+      <!-- Stopped-early notice (partial results) -->
+      <div class="alert alert-warning orc-truncation-warn" ng-if="scanCancelled &amp;&amp; !scanning">
+        <i class="fa fa-exclamation-triangle"></i>
+        <strong>Scan stopped early.</strong>
+        Showing the {{ results.length }} account(s) fetched so far &#8212; run the scan again to load them all.
+      </div>
+
+      <!-- Status line for last scan -->
+      <div class="orc-scan-status">
+        <span ng-if="!scanning &amp;&amp; scanRun &amp;&amp; results.length === 0" class="text-success">
+          <i class="fa fa-check-circle"></i>
+          No orphan accounts found on <strong>{{ lastScannedApp }}</strong>.
+        </span>
+        <span ng-if="!scanning &amp;&amp; results.length > 0">
+          Found <strong>{{ results.length }}</strong> orphan account(s) on
+          <strong>{{ lastScannedApp }}</strong>.
+        </span>
+        <span ng-if="scanError" class="text-danger">
+          <i class="fa fa-exclamation-triangle"></i> {{ scanError }}
+        </span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== Compact post-scan toolbar (shown once a scan has run) ===== -->
+  <div class="orc-card orc-resulthdr" ng-if="scanRun">
+    <div class="orc-resulthdr-main">
+      <h2 class="orc-resulthdr-title">{{ lastScannedApp }} Scan Results</h2>
+      <div class="orc-resulthdr-sub">
+        <span ng-if="results.length > 0"><strong>{{ summary.total }}</strong> orphan account(s) found</span>
+        <span ng-if="results.length === 0" class="text-success"><i class="fa fa-check-circle"></i> No orphan accounts found</span>
+        <span class="orc-resulthdr-meta" ng-if="scannedAt"> &#183; Scanned on {{ scannedAt }}</span>
+      </div>
+    </div>
+    <div class="orc-resulthdr-actions">
+      <select class="form-control input-sm"
+              ng-model="selectedApp"
+              ng-change="setSelectedApp(selectedApp)"
+              ng-disabled="scanning || appsLoading"
+              ng-options="a.name as (a.name + ' - ' + a.orphanCount + ' orphan' + (a.orphanCount===1?'':'s')) for a in applications | orderBy:'-orphanCount'">
+        <option value="">-- Select an application --</option>
+      </select>
+      <button type="button" class="btn btn-primary btn-sm"
+              ng-click="runScan()" ng-disabled="scanning || !selectedApp">
+        <i class="fa" ng-class="scanning ? 'fa-spinner fa-spin' : 'fa-refresh'"></i>
+        {{ scanning ? ' Scanning...' : ' Scan Again' }}
+      </button>
+      <button type="button" class="btn btn-default btn-sm"
+              ng-click="loadApplications()" ng-disabled="appsLoading || scanning"
+              title="Reload applications and refresh orphan counts">
+        <i class="fa" ng-class="appsLoading ? 'fa-spinner fa-spin' : 'fa-refresh'"></i> Refresh Applications
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Pre-scan empty state (hidden once a scan has run) ===== -->
+  <div class="orc-emptystate" ng-if="!scanning &amp;&amp; !scanRun">
+    <div class="orc-emptystate-icon"><i class="fa fa-search"></i></div>
+    <h3 class="orc-emptystate-title">No scan results yet</h3>
+    <p class="orc-emptystate-desc">Select an application and click Scan to view orphan accounts available for manual correlation.</p>
+    <p class="orc-emptystate-note"><i class="fa fa-info-circle"></i> Only applications with detected orphan accounts are shown in the list.</p>
+  </div>
+
+  <!-- ===== KPI cards + outcome bar + strategy list ===== -->
+  <div ng-if="results.length > 0">
+    <div class="orc-kpis">
+      <div class="orc-kpi">
+        <div class="orc-kpi-val">{{ summary.total }}</div>
+        <div class="orc-kpi-lbl">Total Orphans</div>
+      </div>
+      <div class="orc-kpi orc-kpi-matched">
+        <div class="orc-kpi-val">{{ summary.matched }}</div>
+        <div class="orc-kpi-lbl">Matched &#183; {{ summary.pctMatched }}%</div>
+      </div>
+      <div class="orc-kpi orc-kpi-unresolved">
+        <div class="orc-kpi-val">{{ summary.nomatch }}</div>
+        <div class="orc-kpi-lbl">Unresolved &#183; {{ summary.pctNoMatch }}%</div>
+      </div>
+      <div class="orc-kpi orc-kpi-service">
+        <div class="orc-kpi-val">{{ summary.service }}</div>
+        <div class="orc-kpi-lbl">Service / Bot &#183; {{ summary.pctService }}%</div>
+      </div>
+    </div>
+
+    <div class="orc-outcomebar">
+      <div class="orc-outcomebar-track">
+        <span class="orc-seg orc-seg-matched"    ng-style="{width: summary.pctMatched + '%'}"  title="Matched"></span>
+        <span class="orc-seg orc-seg-unresolved" ng-style="{width: summary.pctNoMatch + '%'}"  title="Unresolved"></span>
+        <span class="orc-seg orc-seg-service"    ng-style="{width: summary.pctService + '%'}"  title="Service / Bot"></span>
+      </div>
+      <div class="orc-outcomebar-legend">
+        <span><i class="orc-dot orc-dot-matched"></i> Matched <b>{{ summary.matched }}</b></span>
+        <span><i class="orc-dot orc-dot-unresolved"></i> Unresolved <b>{{ summary.nomatch }}</b></span>
+        <span><i class="orc-dot orc-dot-service"></i> Service / Bot <b>{{ summary.service }}</b></span>
+        <span class="orc-strat-list" ng-if="summary.strat.length > 0">
+          Strategy:
+          <span ng-repeat="s in summary.strat">{{ s.name }} <b>{{ s.count }}</b><span ng-if="!$last"> &#183; </span></span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compact toolbar: confidence filter pills (left) + count + actions (right) -->
+  <div class="orc-toolbar2" ng-if="results.length > 0">
+    <ul class="nav nav-tabs orc-filters">
+      <li ng-class="{active: activeFilter==='ALL'}"><a href="" ng-click="setFilter('ALL')">All <span class="badge">{{ summary.total }}</span></a></li>
+      <li ng-class="{active: activeFilter==='MATCHED'}"><a href="" ng-click="setFilter('MATCHED')"><span class="orc-pip orc-pip-matched"></span>Matched <span class="badge">{{ countMatched() }}</span></a></li>
+      <li ng-class="{active: activeFilter==='AMBIGUOUS'}"><a href="" ng-click="setFilter('AMBIGUOUS')"><span class="orc-pip orc-pip-amb"></span>Ambiguous <span class="badge">{{ countAmbiguous() }}</span></a></li>
+      <li ng-class="{active: activeFilter==='UNRESOLVED'}"><a href="" ng-click="setFilter('UNRESOLVED')"><span class="orc-pip orc-pip-unresolved"></span>Unresolved <span class="badge">{{ countUnresolved() }}</span></a></li>
+      <li ng-class="{active: activeFilter==='SERVICE'}"><a href="" ng-click="setFilter('SERVICE')"><span class="orc-pip orc-pip-service"></span>Service / Bot <span class="badge">{{ countService() }}</span></a></li>
+    </ul>
+    <div class="orc-toolbar2-right">
+      <span class="orc-result-count">{{ filteredResults().length }} of {{ results.length }}</span>
+      <button type="button" class="btn btn-sm" ng-class="showFilters ? 'btn-primary' : 'btn-default'" ng-click="toggleFilters()">
+        <i class="fa fa-filter"></i> {{ showFilters ? 'Hide Filters' : 'Filters' }}
+        <span class="badge orc-filter-badge" ng-if="activeFilterCount() > 0">{{ activeFilterCount() }}</span>
+        <i class="fa" ng-class="showFilters ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+      </button>
+      <button type="button" class="btn btn-default btn-sm" ng-click="exportCsv()" title="Export filtered rows to CSV">
+        <i class="fa fa-download"></i> Export
+      </button>
+    </div>
+  </div>
+
+  <!-- Advanced filter panel -->
+  <div class="orc-filterpanel" ng-if="results.length > 0 &amp;&amp; showFilters">
+    <div class="orc-filterpanel-head">
+      <h4 class="orc-filterpanel-title">Advanced Filters</h4>
+      <p class="orc-filterpanel-sub">Refine results by account, suggested identity, strategy, confidence, or match reason.</p>
+    </div>
+
+    <!-- Row 1: account / identity / strategy / confidence -->
+    <div class="orc-filtergrid">
+      <div class="orc-field">
+        <label>Orphan Account</label>
+        <input type="text" class="form-control input-sm" ng-model="filters.account" placeholder="Contains..."/>
+      </div>
+      <div class="orc-field">
+        <label>Suggested Identity</label>
+        <input type="text" class="form-control input-sm" ng-model="filters.identity" placeholder="Name / login / email"/>
+      </div>
+      <div class="orc-field">
+        <label>Strategy</label>
+        <select class="form-control input-sm" ng-model="filters.strategy">
+          <option value="">All</option>
+          <option ng-repeat="s in strategyOptions" value="{{s}}">{{ s }}</option>
+        </select>
+      </div>
+      <div class="orc-field">
+        <label>Confidence</label>
+        <select class="form-control input-sm" ng-model="filters.confidence">
+          <option value="">All</option>
+          <option value="High">High (80-100)</option>
+          <option value="Medium">Medium (50-79)</option>
+          <option value="Low">Low (below 50)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Row 2: match reason (full width) -->
+    <div class="orc-filtergrid">
+      <div class="orc-field orc-field-full">
+        <label>Match Reason</label>
+        <input type="text" class="form-control input-sm" ng-model="filters.detail" placeholder="Contains..."/>
+      </div>
+    </div>
+
+    <!-- Footer: auto-apply note + Clear All -->
+    <div class="orc-filterpanel-foot">
+      <span class="orc-filter-autonote"><i class="fa fa-info-circle"></i> Filters apply automatically</span>
+      <button type="button" class="btn btn-default btn-sm" ng-click="clearFilters()"
+              ng-disabled="activeFilterCount() === 0">Clear All</button>
+    </div>
+  </div>
+
+  <!-- Bulk action bar (Access-Review style) -->
+  <div class="orc-bulkbar" ng-if="results.length > 0 &amp;&amp; selectedCount() > 0">
+    <div class="orc-bulk-info">
+      <i class="fa fa-check-square"></i>
+      <strong>{{ selectedCount() }}</strong> selected
+    </div>
+    <div class="orc-bulk-actions">
+      <button type="button" class="btn btn-primary btn-sm" ng-click="openBulkApproval()">
+        <i class="fa fa-paper-plane-o"></i> Send {{ selectedCount() }} for Approval
+      </button>
+      <button type="button" class="btn btn-success btn-sm" ng-if="selectedCorrelatableCount() > 0" ng-click="openBulkConfirm()">
+        <i class="fa fa-link"></i> Correlate {{ selectedCorrelatableCount() }} now
+      </button>
+      <button type="button" class="btn btn-default btn-sm" ng-click="clearSelection()">Clear</button>
+    </div>
+  </div>
+
+  <!-- Bulk result toast -->
+  <div class="orc-bulk-toast" ng-if="bulkSummary">
+    <i class="fa fa-check-circle"></i>
+    Correlated <strong>{{ bulkSummary.success }}</strong> account(s)<span ng-if="bulkSummary.failed > 0">, <strong>{{ bulkSummary.failed }}</strong> failed</span>.
+    <a href="" ng-click="bulkSummary = null" class="orc-toast-x">&times;</a>
+  </div>
+
+  <!-- Bulk approval result toast -->
+  <div class="orc-bulk-toast orc-approval-toast" ng-if="bulkApprovalSummary">
+    <i class="fa fa-paper-plane-o"></i>
+    Sent <strong>{{ bulkApprovalSummary.success }}</strong> account(s) for manager approval<span ng-if="bulkApprovalSummary.failed > 0">, <strong>{{ bulkApprovalSummary.failed }}</strong> failed/skipped (already pending or no manager)</span>.
+    <a href="" ng-click="bulkApprovalSummary = null" class="orc-toast-x">&times;</a>
+  </div>
+
+  <!-- Approval-sent toast (single) -->
+  <div class="orc-bulk-toast orc-approval-toast" ng-if="approvalToast">
+    <i class="fa fa-paper-plane-o"></i>
+    Sent to <strong>{{ approvalToast.manager }}</strong> for approval: <strong>{{ approvalToast.account }}</strong>.
+    The account will be correlated once the manager approves.
+    <a href="" ng-click="approvalToast = null" class="orc-toast-x">&times;</a>
+  </div>
+
+  <div class="panel panel-default" ng-if="results.length > 0">
+    <div class="panel-body" style="padding:0;overflow-x:auto;">
+      <table class="table table-hover table-condensed" style="margin-bottom:0;">
+        <thead>
+          <tr>
+            <th class="orc-cbcol text-center" style="width:2%;">
+              <input type="checkbox" ng-if="canCorrelate" ng-checked="allVisibleSelected()" ng-click="toggleSelectAll()"
+                     title="Select all eligible matches"/>
+            </th>
+            <th style="width:21%;">Orphan Account</th>
+            <th style="width:18%;">Suggested Identity</th>
+            <th style="width:10%;" class="text-center" title="High 80-100 - Medium 50-79 - Low below 50">Confidence</th>
+            <th style="width:35%;">Match Reason</th>
+            <th style="width:14%;" class="text-center">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr ng-repeat="r in pagedResults()" ng-class="rowClass(r)">
+            <td class="orc-cbcol text-center">
+              <input type="checkbox" ng-if="isSelectable(r)"
+                     ng-checked="selected[r.nativeIdentity]" ng-click="toggleRow(r)"/>
+            </td>
+            <td class="orc-col-orphan" title="{{ r.distinguishedName }}">
+              <div class="orc-orphan">
+                <div class="orc-orphan-ico"><i class="fa fa-user"></i></div>
+                <div class="orc-orphan-text">
+                  <div class="orc-orphan-name">
+                    {{ dnLeaf(r.distinguishedName) || r.nativeIdentity }}
+                    <span ng-if="r.correlated" class="label label-success orc-done-pill">Correlated</span>
+                  </div>
+                  <div class="orc-orphan-path" ng-if="dnPath(r.distinguishedName)">
+                    <i class="fa fa-sitemap"></i>{{ dnPath(r.distinguishedName) }}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="orc-identity" ng-if="r.matchedIdentityName">
+                <div>
+                  <div class="orc-identity-name">
+                    <a ng-href="{{ identityUrl(r) }}" target="_blank" rel="noopener"
+                       title="Open this identity in IdentityIQ (new tab)">{{ r.matchedIdentityDisplayName }}</a>
+                    <i class="fa fa-external-link orc-ext-link"></i>
+                  </div>
+                  <div class="orc-identity-sub">{{ r.matchedIdentityName }}</div>
+                  <div class="orc-identity-sub" ng-if="r.matchedIdentityEmail">{{ r.matchedIdentityEmail }}</div>
+                </div>
+              </div>
+              <span ng-if="!r.matchedIdentityName" class="text-muted">&mdash;</span>
+            </td>
+            <td class="text-center">
+              <span ng-if="r.matchedIdentityName" class="orc-score" ng-class="scoreClass(r)"
+                    title="Confidence: High 80-100, Medium 50-79, Low below 50">{{ r.score }} <span class="orc-score-word">{{ scoreLabel(r) }}</span></span>
+              <span ng-if="!r.matchedIdentityName" class="text-muted">&mdash;</span>
+              <div ng-if="r.ambiguous" class="orc-amb-flag" title="Runner-up scored within the ambiguity gap">
+                <i class="fa fa-exclamation-triangle"></i> Ambiguous
+              </div>
+            </td>
+            <td class="orc-detail" title="{{ r.matchDetail }}">
+              <div class="orc-detail-text">{{ r.matchDetail || ' - ' }}</div>
+              <div ng-if="r.warnings.length > 0" class="orc-warn-list">
+                <div ng-repeat="w in r.warnings" class="orc-warn"><i class="fa fa-exclamation-circle"></i> {{ w }}</div>
+              </div>
+            </td>
+            <td class="text-center">
+              <span ng-if="r.correlated" class="text-success"><i class="fa fa-check-circle"></i> Done</span>
+              <span class="orc-action-stack" ng-if="!r.correlated &amp;&amp; r.matchedIdentityName">
+                <!-- Direct correlate: only for confident, non-ambiguous matches -->
+                <button type="button" class="btn btn-success btn-xs"
+                  ng-if="isEligible(r)"
+                  ng-click="openConfirm(r)"
+                  title="Correlate immediately (admin action)">
+                  <i class="fa fa-link"></i> Correlate
+                </button>
+                <!-- Manager approval: available for ANY matched candidate (safe path) -->
+                <button type="button" class="btn btn-primary btn-xs"
+                  ng-if="canCorrelate &amp;&amp; r.approvalStatus !== 'pending'"
+                  ng-click="openApprovalRequest(r)"
+                  title="Send to line manager for approval first">
+                  <i class="fa fa-paper-plane-o"></i> Send for Approval
+                </button>
+                <button type="button" class="btn btn-default btn-xs orc-sent-btn"
+                  ng-if="r.approvalStatus === 'pending'"
+                  disabled="disabled"
+                  title="An approval is already pending with the manager for this account">
+                  <i class="fa fa-clock-o"></i> Sent for Approval
+                </button>
+                <span ng-if="!canCorrelate &amp;&amp; r.approvalStatus !== 'pending'" class="text-muted">
+                  <i class="fa fa-eye"></i> View only
+                </span>
+              </span>
+              <span ng-if="!r.matchedIdentityName" class="text-muted">
+                <i class="fa fa-times-circle-o"></i> No match
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Results pager: only the current page of rows is rendered, so the
+           browser stays responsive even with thousands of total results. -->
+      <div class="orc-pager" ng-if="results.length > 0">
+        <span class="orc-pager-size">
+          Items per page
+          <select class="form-control input-sm" ng-model="displayPageSize"
+                  ng-options="s for s in pageSizes"
+                  ng-change="setPageSize(displayPageSize)"></select>
+        </span>
+        <span class="orc-pager-info">{{ pageRangeLabel() }}</span>
+        <span class="orc-pager-btns">
+          <button type="button" class="btn btn-default btn-xs" ng-click="gotoPage(1)" ng-disabled="displayPage &lt;= 1" title="First page"><i class="fa fa-step-backward"></i></button>
+          <button type="button" class="btn btn-default btn-xs" ng-click="gotoPage(displayPage-1)" ng-disabled="displayPage &lt;= 1" title="Previous page"><i class="fa fa-angle-left"></i></button>
+          <button type="button" class="btn btn-xs" ng-repeat="p in pageWindow()"
+                  ng-class="p === displayPage ? 'btn-primary' : 'btn-default'"
+                  ng-click="gotoPage(p)">{{ p }}</button>
+          <button type="button" class="btn btn-default btn-xs" ng-click="gotoPage(displayPage+1)" ng-disabled="displayPage>=displayPageCount()" title="Next page"><i class="fa fa-angle-right"></i></button>
+          <button type="button" class="btn btn-default btn-xs" ng-click="gotoPage(displayPageCount())" ng-disabled="displayPage>=displayPageCount()" title="Last page"><i class="fa fa-step-forward"></i></button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="orc-empty" ng-if="!scanning &amp;&amp; results.length===0 &amp;&amp; scanRun">
+    <i class="fa fa-check-circle fa-3x"></i>
+    <p class="lead">All accounts are correlated.</p>
+  </div>
+
+  <!-- BULK CONFIRM MODAL -->
+  <div class="modal-backdrop fade in" ng-if="bulkConfirm"></div>
+  <div class="modal fade in" style="display:block;" ng-if="bulkConfirm">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" ng-click="cancelBulkConfirm()" ng-disabled="bulkRunning">&times;</button>
+          <h4 class="modal-title"><i class="fa fa-link"></i> Bulk Correlate</h4>
+        </div>
+        <div class="modal-body">
+          <p>
+            You are about to correlate <strong>{{ selectedCorrelatableCount() }}</strong> account(s) to their matched
+            identities. This attaches each account to its identity and cannot be undone without an aggregation cycle.
+          </p>
+          <div class="alert alert-warning" ng-if="selectedRowsHasLow()">
+            <i class="fa fa-exclamation-triangle"></i>
+            Some selected matches score <strong>below 80</strong> - review before proceeding.
+          </div>
+          <div class="alert alert-danger" ng-if="bulkError">
+            <i class="fa fa-times-circle"></i> {{ bulkError }}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" ng-click="cancelBulkConfirm()" ng-disabled="bulkRunning">Cancel</button>
+          <button type="button" class="btn btn-success" ng-click="doBulkCorrelate()" ng-disabled="bulkRunning">
+            <i class="fa" ng-class="bulkRunning ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+            {{ bulkRunning ? ' Correlating...' : ' Correlate ' + selectedCorrelatableCount() + ' account(s)' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BULK APPROVAL CONFIRM MODAL -->
+  <div class="modal-backdrop fade in" ng-if="bulkApprovalConfirm"></div>
+  <div class="modal fade in" style="display:block;" ng-if="bulkApprovalConfirm">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" ng-click="cancelBulkApproval()" ng-disabled="bulkApprovalRunning">&times;</button>
+          <h4 class="modal-title"><i class="fa fa-paper-plane-o"></i> Send for Manager Approval</h4>
+        </div>
+        <div class="modal-body">
+          <p>
+            You are about to send <strong>{{ selectedCount() }}</strong> account(s) to their matched identity's
+            line manager for approval. Each manager receives a work item and an email; each account is correlated
+            only after that manager approves.
+          </p>
+          <div class="alert alert-info" style="margin-bottom:0;">
+            <i class="fa fa-info-circle"></i>
+            Accounts that already have a pending approval are skipped automatically.
+          </div>
+          <div class="alert alert-danger" ng-if="bulkApprovalError" style="margin-top:10px;">
+            <i class="fa fa-times-circle"></i> {{ bulkApprovalError }}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" ng-click="cancelBulkApproval()" ng-disabled="bulkApprovalRunning">Cancel</button>
+          <button type="button" class="btn btn-primary" ng-click="doBulkApproval()" ng-disabled="bulkApprovalRunning">
+            <i class="fa" ng-class="bulkApprovalRunning ? 'fa-spinner fa-spin' : 'fa-paper-plane-o'"></i>
+            {{ bulkApprovalRunning ? ' Sending...' : ' Send ' + selectedCount() + ' for Approval' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BACKDROP -->
+  <div class="modal-backdrop fade in" ng-if="pendingCorrelation"></div>
+
+  <!-- CONFIRM MODAL -->
+  <div class="modal fade in" style="display:block;" ng-if="pendingCorrelation">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" ng-click="cancelConfirm()" ng-disabled="correlating">&times;</button>
+          <h4 class="modal-title"><i class="fa fa-link"></i> Confirm Correlation</h4>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-bottom:16px;">
+            Review the details below before correlating. This action attaches the account to the identity and cannot be undone without an aggregation cycle.
+          </p>
+          <table class="table table-condensed table-bordered">
+            <tr><th class="orc-confirm-th">Orphan account</th><td><code>{{ pendingCorrelation.nativeIdentity }}</code></td></tr>
+            <tr><th class="orc-confirm-th">Identity</th><td><strong>{{ pendingCorrelation.matchedIdentityDisplayName }}</strong> ({{ pendingCorrelation.matchedIdentityName }})</td></tr>
+            <tr><th class="orc-confirm-th">Email</th><td>{{ pendingCorrelation.matchedIdentityEmail }}</td></tr>
+            <tr><th class="orc-confirm-th">Score</th><td><span class="orc-score" ng-class="scoreClass(pendingCorrelation)">{{ pendingCorrelation.score }}</span> / 100
+                <span ng-if="pendingCorrelation.ambiguous" class="orc-amb-flag"><i class="fa fa-exclamation-triangle"></i> Ambiguous</span></td></tr>
+            <tr ng-if="pendingCorrelation.reasons.length > 0"><th class="orc-confirm-th">Reasons</th><td class="text-muted">{{ pendingCorrelation.reasons.join(', ') }}</td></tr>
+            <tr><th class="orc-confirm-th">Match detail</th><td class="text-muted">{{ pendingCorrelation.matchDetail }}</td></tr>
+          </table>
+          <div class="alert alert-warning" ng-if="pendingCorrelation.score &lt; 80">
+            <i class="fa fa-exclamation-triangle"></i>
+            <strong>Score {{ pendingCorrelation.score }}/100.</strong> Lower-scoring match &mdash; verify the identity manually before confirming, or send for manager approval instead.
+          </div>
+          <div class="alert alert-warning" ng-if="pendingCorrelation.warnings.length > 0">
+            <i class="fa fa-exclamation-triangle"></i>
+            <div ng-repeat="w in pendingCorrelation.warnings">{{ w }}</div>
+          </div>
+          <div class="alert alert-danger" ng-if="correlateError">
+            <i class="fa fa-times-circle"></i> {{ correlateError }}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" ng-click="cancelConfirm()" ng-disabled="correlating">Cancel</button>
+          <button type="button" class="btn btn-success" ng-click="doCorrelate()" ng-disabled="correlating">
+            <i class="fa" ng-class="correlating ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+            {{ correlating ? ' Correlating...' : ' Confirm Correlation' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop fade in" ng-if="pendingApprovalRequest"></div>
+
+  <div class="modal fade in" style="display:block;" ng-if="pendingApprovalRequest">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" ng-click="cancelApprovalRequest()" ng-disabled="requestingApproval">&times;</button>
+          <h4 class="modal-title"><i class="fa fa-paper-plane-o"></i> Send for Manager Approval</h4>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-bottom:16px;" ng-if="!approvalSent">
+            A work item will be sent to the matched identity's line manager.
+            The account will only be correlated after the manager approves.
+            You will receive an email with the outcome.
+          </p>
+          <table class="table table-condensed table-bordered" ng-if="!approvalSent">
+            <tr><th class="orc-confirm-th">Orphan account</th><td><code>{{ pendingApprovalRequest.nativeIdentity }}</code></td></tr>
+            <tr><th class="orc-confirm-th">Matched identity</th><td><strong>{{ pendingApprovalRequest.matchedIdentityDisplayName }}</strong> ({{ pendingApprovalRequest.matchedIdentityName }})</td></tr>
+            <tr><th class="orc-confirm-th">Email</th><td>{{ pendingApprovalRequest.matchedIdentityEmail }}</td></tr>
+            <tr><th class="orc-confirm-th">Score</th><td><span class="orc-score" ng-class="scoreClass(pendingApprovalRequest)">{{ pendingApprovalRequest.score }}</span> / 100
+                <span ng-if="pendingApprovalRequest.ambiguous" class="orc-amb-flag"><i class="fa fa-exclamation-triangle"></i> Ambiguous</span></td></tr>
+          </table>
+          <div class="alert alert-info" style="margin-bottom:0;" ng-if="!approvalSent">
+            <i class="fa fa-info-circle"></i>
+            <strong>The line manager will:</strong> receive an email notification and see a work item
+            in their IIQ Approvals inbox. Correlation happens only on their approval.
+          </div>
+          <!-- Success confirmation: modal stays open so the user always sees it. -->
+          <div class="alert alert-success" style="margin-bottom:0;" ng-if="approvalSent">
+            <i class="fa fa-check-circle"></i>
+            <strong>Sent for approval.</strong> A work item and email notification have gone to
+            <strong>{{ approvalSent.manager }}</strong> for <strong>{{ approvalSent.account }}</strong>.
+            The account will be correlated only after they approve - you'll get an email with the outcome.
+          </div>
+          <div class="alert alert-danger" ng-if="approvalRequestError" style="margin-top:10px;">
+            <i class="fa fa-times-circle"></i> {{ approvalRequestError }}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" ng-if="!approvalSent" ng-click="cancelApprovalRequest()" ng-disabled="requestingApproval">Cancel</button>
+          <button type="button" class="btn btn-primary" ng-if="!approvalSent" ng-click="doRequestApproval()" ng-disabled="requestingApproval">
+            <i class="fa" ng-class="requestingApproval ? 'fa-spinner fa-spin' : 'fa-paper-plane-o'"></i>
+            {{ requestingApproval ? ' Sending...' : ' Send for Approval' }}
+          </button>
+          <button type="button" class="btn btn-success" ng-if="approvalSent" ng-click="cancelApprovalRequest()">
+            <i class="fa fa-check"></i> Done
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<!-- Bundle AngularJS (1.8.0, the version IIQ 8.5 ships). Some IIQ builds do NOT
+     load AngularJS on plugin pages, so the plugin provides its own copy and no
+     longer depends on the host. Must load BEFORE correlator.js. -->
+<script type="text/javascript"
+  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/lib/angular.min.js?v=1_0_0">
+</script>
+<script type="text/javascript"
+  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/correlator.js?v=1_0_0">
+</script>
+</h:body>
+</html>
+
+

@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<sailpoint>
+
+  <!-- READ right: open the plugin page, list applications, run a scan. -->
+  <SPRight name="ViewOrphanCorrelator"
+           displayName="View Orphan Account Correlator">
+    <Description>
+      Grants read-only access to the Orphan Account Correlator plugin page,
+      navigation icon, and scan results. Does NOT permit correlating accounts.
+    </Description>
+  </SPRight>
+
+  <!-- WRITE right: re-point links, delete empty dummies, launch approvals.
+       Required by the correlate, correlate-bulk and request-approval endpoints
+       so a view-only operator cannot mutate or delete identities. -->
+  <SPRight name="CorrelateOrphanAccount"
+           displayName="Correlate Orphan Accounts">
+    <Description>
+      Grants permission to perform correlation actions: re-point an orphan
+      account to a real identity (directly or via bulk), delete an emptied
+      dummy identity, and send a match to a manager for approval. Assign only
+      to operators trusted to change account-to-identity links.
+    </Description>
+  </SPRight>
+
+  <!-- Capability bundling both rights for easy assignment -->
+  <Capability name="OrphanCorrelatorAdmin"
+              displayName="Orphan Correlator Admin">
+    <Description>
+      Full access to the Orphan Account Correlator plugin (view AND correlate).
+      Assign to IAM administrators who need to review and correlate orphaned
+      accounts. For review-only staff, assign the View right alone instead.
+    </Description>
+    <RightRefs>
+      <Reference class="sailpoint.object.SPRight" name="ViewOrphanCorrelator"/>
+      <Reference class="sailpoint.object.SPRight" name="CorrelateOrphanAccount"/>
+    </RightRefs>
+  </Capability>
+
+</sailpoint>

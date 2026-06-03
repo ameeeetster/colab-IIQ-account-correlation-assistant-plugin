@@ -1,0 +1,761 @@
+/*
+ * Orphan Account Correlator - Plugin stylesheet (v2)
+ *
+ * IIQ 8.x ships Bootstrap 3 + Open Sans + Font Awesome already.
+ * This file restyles the plugin into a modern card-based UI while keeping
+ * every Angular binding and class the controller/markup rely on.
+ *
+ * Palette:  primary #0071BC  primary-dark #005a96  accent #00a3e0
+ *           ink #2b3a4a  muted #6b7c8c  line #e3e9ef  surface #ffffff
+ */
+
+#orc-root {
+    --orc-primary:      #0a78b5;   /* SailPoint blue */
+    --orc-primary-dark: #075e8f;
+    --orc-accent:       #00a9ce;   /* turquoise */
+    --orc-ink:          #1c2b46;   /* navy */
+    --orc-muted:        #6b7382;
+    --orc-line:         #e3e8ef;
+    --orc-bg:           #f5f6f9;
+    --orc-radius:       8px;
+    --orc-shadow:       0 1px 2px rgba(20,40,70,.06), 0 4px 14px rgba(20,40,70,.05);
+    color: var(--orc-ink);
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+/* Primary action - SailPoint blue (scoped override of Bootstrap btn-primary) */
+#orc-root .btn-primary {
+    background: var(--orc-primary);
+    border-color: var(--orc-primary);
+}
+#orc-root .btn-primary:hover, #orc-root .btn-primary:focus {
+    background: var(--orc-primary-dark);
+    border-color: var(--orc-primary-dark);
+    color: #fff;
+}
+#orc-root .btn-primary[disabled], #orc-root .btn-primary.disabled {
+    background: var(--orc-primary); border-color: var(--orc-primary); opacity: .5;
+}
+
+/* ============================ Module header ============================ */
+.orc-header {
+    background: #ffffff;
+    border: 1px solid var(--orc-line);
+    border-radius: var(--orc-radius);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: var(--orc-shadow);
+    position: relative;
+    overflow: hidden;
+}
+.orc-header:before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--orc-accent);
+}
+.orc-header-icon {
+    flex: 0 0 auto;
+    width: 42px; height: 42px;
+    border-radius: 10px;
+    background: #eaf3fb;                 /* very light blue */
+    display: flex; align-items: center; justify-content: center;
+    font-size: 21px;                     /* glyph 20-22px */
+    color: var(--orc-primary);           /* SailPoint-style blue */
+}
+.orc-header-titlerow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.orc-header-text h1 {
+    margin: 0; font-size: 20px; font-weight: 700;
+    color: var(--orc-ink); letter-spacing: .2px;
+}
+.orc-header-text p { margin: 4px 0 0; font-size: 13px; color: var(--orc-muted); }
+.orc-tag {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px;
+    color: var(--orc-primary-dark);
+    background: #e9f4fa; border: 1px solid #cfe7f2;
+    border-radius: 999px; padding: 3px 10px;
+}
+
+/* ============================ Cards ============================ */
+.orc-card {
+    background: #ffffff;
+    border: 1px solid var(--orc-line);
+    border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow);
+    margin-bottom: 18px;
+}
+.orc-card-head { padding: 16px 22px 0; }
+.orc-card-title { margin: 0; font-size: 16px; font-weight: 700; color: var(--orc-ink); }
+.orc-card-sub { margin: 4px 0 0; font-size: 13px; color: var(--orc-muted); }
+.orc-card-body { padding: 18px 22px 20px; }
+
+/* ---- Field (label + control + badge) ---- */
+.orc-field { margin-bottom: 16px; }
+.orc-field-label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--orc-ink); margin-bottom: 6px;
+}
+.orc-field-control { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.orc-field-control .form-control { max-width: 420px; }
+.orc-orphan-badge {
+    font-size: 12px; font-weight: 600;
+    color: var(--orc-primary-dark);
+    background: #e9f4fa; border: 1px solid #cfe7f2;
+    border-radius: 999px; padding: 4px 12px; white-space: nowrap;
+}
+
+/* ---- Actions row ---- */
+.orc-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.orc-inline-err { font-size: 13px; }
+
+/* ============================ Pre-scan empty state ============================ */
+.orc-emptystate {
+    background: #ffffff;
+    border: 1px dashed var(--orc-line);
+    border-radius: var(--orc-radius);
+    padding: 48px 24px;
+    text-align: center;
+}
+.orc-emptystate-icon {
+    width: 64px; height: 64px; margin: 0 auto 16px;
+    border-radius: 50%;
+    background: #eef4f8;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; color: var(--orc-primary);
+}
+.orc-emptystate-title { margin: 0 0 6px; font-size: 17px; font-weight: 700; color: var(--orc-ink); }
+.orc-emptystate-desc { margin: 0 auto; max-width: 460px; font-size: 13px; color: var(--orc-muted); }
+.orc-emptystate-note { margin: 14px 0 0; font-size: 12px; color: #9aa3af; }
+
+/* ============== Certification-style summary header ============== */
+.orc-sumhdr {
+    display: grid; grid-template-columns: 1fr 1.4fr; gap: 28px;
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); padding: 16px 20px; margin: 14px 0;
+}
+.orc-meta-row { display: flex; gap: 12px; padding: 4px 0; font-size: 13px; }
+.orc-meta-k { width: 130px; flex: 0 0 auto; color: var(--orc-muted); font-weight: 600; }
+.orc-meta-v { color: var(--orc-ink); font-weight: 600; }
+.orc-prog { display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+.orc-prog-row { display: flex; align-items: center; gap: 12px; }
+.orc-prog-k { width: 160px; flex: 0 0 auto; font-size: 12.5px; color: var(--orc-muted); font-weight: 600; }
+.orc-prog-bar { flex: 1; height: 16px; background: #eef0f4; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--orc-line); }
+.orc-prog-fill { display: block; height: 100%; transition: width .4s ease; }
+.orc-fill-green { background: #5aa700; }
+.orc-fill-grey  { background: #9aa3af; }
+.orc-fill-red   { background: #d9534f; }
+.orc-prog-v { width: 120px; flex: 0 0 auto; text-align: right; font-size: 12px; color: var(--orc-ink); font-variant-numeric: tabular-nums; }
+
+/* ============== Decision-Statistics pie panel ============== */
+.orc-statspanel {
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); margin: 0 0 14px;
+}
+.orc-statspanel-title {
+    background: #f6f7fb;
+    border-bottom: 1px solid var(--orc-line);
+    padding: 9px 16px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--orc-muted); border-radius: var(--orc-radius) var(--orc-radius) 0 0;
+}
+.orc-statcols { display: grid; grid-template-columns: repeat(2, 1fr); }
+.orc-statcol { padding: 18px 16px 20px; text-align: center; border-right: 1px solid var(--orc-line); }
+.orc-statcol:last-child { border-right: none; }
+.orc-statcol h4 { margin: 0 0 14px; font-size: 14px; font-weight: 700; color: var(--orc-ink); }
+.orc-pie {
+    width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 14px;
+    box-shadow: 0 1px 3px rgba(20,40,70,.15);
+}
+.orc-nodata { color: var(--orc-muted); font-size: 12.5px; padding: 44px 0; }
+.orc-pielegend { list-style: none; padding: 0; margin: 0; display: inline-block; text-align: left; }
+.orc-pielegend li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; color: var(--orc-ink); }
+.orc-pielegend li b { margin-left: auto; padding-left: 14px; font-variant-numeric: tabular-nums; }
+.orc-leg-click { cursor: pointer; border-radius: 5px; padding: 3px 6px !important; margin: 0 -6px; }
+.orc-leg-click:hover { background: #f3f4fb; }
+.orc-leg-on { background: #ecebfb; box-shadow: inset 0 0 0 1px #d8d9f2; }
+
+@media (max-width: 900px) {
+    .orc-sumhdr { grid-template-columns: 1fr; gap: 16px; }
+    .orc-statcols { grid-template-columns: 1fr; }
+    .orc-statcol { border-right: none; border-bottom: 1px solid var(--orc-line); }
+}
+
+/* ============================ Charts ============================ */
+.orc-charts {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1.2fr;
+    gap: 12px;
+    margin: 0 0 14px;
+}
+.orc-chart-card {
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); padding: 14px 16px;
+}
+.orc-chart-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--orc-muted); margin-bottom: 12px;
+}
+/* donut */
+.orc-donut-wrap { display: flex; align-items: center; gap: 16px; }
+.orc-donut {
+    width: 104px; height: 104px; border-radius: 50%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    background: #eef0f3;
+}
+.orc-donut-hole {
+    width: 70px; height: 70px; border-radius: 50%; background: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: inset 0 0 0 1px var(--orc-line);
+}
+.orc-donut-num { font-size: 19px; font-weight: 700; color: var(--orc-ink); line-height: 1; }
+.orc-donut-sub { font-size: 10px; color: var(--orc-muted); text-transform: uppercase; letter-spacing: .4px; }
+.orc-legend { list-style: none; padding: 0; margin: 0; font-size: 12px; color: var(--orc-ink); }
+.orc-legend li { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+.orc-legend li b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.orc-legend-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; }
+.orc-legend-inline li { padding: 0; }
+.orc-lg { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+/* stacked confidence bar */
+.orc-stackbar {
+    display: flex; height: 26px; border-radius: 7px; overflow: hidden;
+    background: #eef0f3; box-shadow: inset 0 0 0 1px var(--orc-line);
+}
+.orc-stackbar > span { height: 100%; transition: width .4s ease; }
+/* strategy bars */
+.orc-bars { display: flex; flex-direction: column; gap: 9px; }
+.orc-bar-row { display: flex; align-items: center; gap: 9px; }
+.orc-bar-label { width: 108px; flex: 0 0 auto; font-size: 12px; color: var(--orc-ink); }
+.orc-bar-track { flex: 1; height: 9px; background: #eef0f4; border-radius: 99px; overflow: hidden; }
+.orc-bar-fill { display: block; height: 100%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--orc-primary), var(--orc-accent)); transition: width .4s ease; }
+.orc-bar-val { width: 34px; text-align: right; font-size: 12px; font-weight: 600; color: var(--orc-muted); font-variant-numeric: tabular-nums; }
+.orc-bars-empty { font-size: 12px; color: var(--orc-muted); }
+
+/* ============================ Compact toolbar + filters ============================ */
+.orc-toolbar2 {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin: 0 0 12px;
+}
+.orc-toolbar2 .orc-filters { margin: 0; }
+.orc-toolbar2-right { display: flex; align-items: center; gap: 8px; }
+.orc-result-count { font-size: 12.5px; color: var(--orc-muted); margin-right: 2px; }
+/* confidence dots on pills */
+.orc-pip { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.orc-pip-vhigh { background: #1f8a4c; }
+.orc-pip-high { background: #2e9e5b; }
+.orc-pip-med  { background: var(--orc-primary); }
+.orc-pip-low  { background: #c79a2e; }
+.orc-pip-vlow { background: #d9534f; }
+.orc-pip-amb  { background: #d98a1f; }
+.orc-pip-matched    { background: #1f8a4c; }
+.orc-pip-unresolved { background: #d9534f; }
+.orc-pip-service    { background: #8a93a3; }
+.orc-filter-badge { background: var(--orc-primary); color: #fff; margin-left: 4px; }
+.orc-filterpanel {
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); padding: 16px 18px; margin-bottom: 12px;
+}
+.orc-filterpanel-head { margin-bottom: 14px; }
+.orc-filterpanel-title { margin: 0; font-size: 13px; font-weight: 700; color: var(--orc-ink); text-transform: uppercase; letter-spacing: .4px; }
+.orc-filterpanel-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--orc-muted); }
+.orc-filtergrid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 14px; align-items: end;
+    margin-bottom: 12px;
+}
+.orc-field { display: flex; flex-direction: column; gap: 5px; }
+.orc-field label { font-size: 11px; font-weight: 700; color: var(--orc-muted); text-transform: uppercase; letter-spacing: .4px; margin: 0; }
+.orc-field .form-control { height: 34px; border-radius: 7px; border: 1px solid var(--orc-line); box-shadow: none; }
+.orc-field-wide { grid-column: span 2; }
+.orc-field-full { grid-column: 1 / -1; }
+.orc-field-actions { align-self: end; }
+.orc-filterpanel-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--orc-line); padding-top: 12px; margin-top: 2px;
+}
+.orc-filter-autonote { font-size: 12px; color: var(--orc-muted); }
+.orc-filter-autonote .fa { margin-right: 4px; color: #9aa3af; }
+
+@media (max-width: 1100px) {
+    .orc-charts { grid-template-columns: 1fr; }
+    .orc-filtergrid { grid-template-columns: repeat(2, 1fr); }
+    .orc-field-wide { grid-column: span 2; }
+    .orc-field-full { grid-column: 1 / -1; }
+}
+
+/* keep old class working if referenced, but neutralise its border */
+.orc-page-header { border: none; margin: 0; padding: 0; }
+
+/* ============================ Cards ============================ */
+#orc-root .panel {
+    border: 1px solid var(--orc-line);
+    border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow);
+    overflow: hidden;
+}
+#orc-root .panel { margin-bottom: 14px; }
+#orc-root .panel-heading {
+    background: #fbfbfe;
+    border-bottom: 1px solid var(--orc-line);
+    padding: 9px 14px;
+}
+#orc-root .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--orc-ink);
+}
+#orc-root .panel-title .fa { color: var(--orc-primary); margin-right: 7px; }
+#orc-root .panel-body { padding: 13px 14px; }
+
+/* ============================ Scan toolbar ============================ */
+.orc-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.orc-toolbar label { font-weight: 600; color: var(--orc-muted); margin: 0 4px 0 0; font-size: 13px; }
+#orc-app-select {
+    min-width: 300px;
+    height: 34px;
+    border-radius: 7px;
+    border: 1px solid var(--orc-line);
+    box-shadow: none;
+}
+#orc-root .btn {
+    border-radius: 8px;
+    font-weight: 600;
+    border: none;
+    transition: transform .05s ease, box-shadow .15s ease, background-color .15s ease;
+}
+#orc-root .btn:active { transform: translateY(1px); }
+#orc-root .btn-primary { background: var(--orc-primary); }
+#orc-root .btn-primary:hover { background: var(--orc-primary-dark); }
+#orc-root .btn-sm { height: 34px; padding: 0 14px; line-height: 34px; }
+.orc-scan-status { margin-top: 10px; font-size: 12.5px; }
+.orc-scan-status .fa { margin-right: 5px; }
+
+/* ============================ Filter pills ============================ */
+.orc-filters {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    border: none;
+}
+.orc-filters > li { float: none; margin: 0; }
+.orc-filters > li > a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--orc-line) !important;
+    border-radius: 999px !important;
+    background: #fff;
+    color: var(--orc-muted);
+    padding: 6px 14px !important;
+    font-size: 12.5px;
+    font-weight: 600;
+    margin: 0 !important;
+    line-height: 1.4;
+    transition: all .12s ease;
+}
+.orc-filters > li > a:hover { border-color: var(--orc-accent) !important; color: var(--orc-primary); background: #f4faff; }
+.orc-filters > li.active > a,
+.orc-filters > li.active > a:hover,
+.orc-filters > li.active > a:focus {
+    background: var(--orc-primary) !important;
+    border-color: var(--orc-primary) !important;
+    color: #fff !important;
+}
+.orc-filters .badge {
+    background: rgba(0,0,0,.10);
+    color: inherit;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+.orc-filters > li.active .badge { background: rgba(255,255,255,.25); color: #fff; }
+
+/* ============================ Table ============================ */
+/* Fill full width with percentage columns (summing to 100%) so the spare space
+   is spread evenly across columns - no big gap before Action, no right-edge blank. */
+#orc-root .table { margin: 0; table-layout: fixed; width: 100%; }
+#orc-root .table > thead > tr > th {
+    background: #eeeef8;
+    border-bottom: 2px solid #d0d1e8;
+    border-top: none;
+    color: #3a3f5c;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    padding: 7px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    overflow: hidden;
+    white-space: nowrap;
+}
+#orc-root .table > tbody > tr > td {
+    border-top: 1px solid #eef0f5;
+    padding: 9px 14px;
+    vertical-align: middle;
+    font-size: 12.5px;
+    overflow: hidden;
+    height: 44px;            /* uniform row rhythm; taller content still expands */
+}
+#orc-root .table-hover > tbody > tr:hover { background-color: #f3f9ff !important; }
+
+/* Zebra striping for scanability */
+#orc-root .table > tbody > tr:nth-child(even) { background-color: #fafbfe; }
+#orc-root .table-hover > tbody > tr:hover { background-color: #eef6ff !important; }
+
+/* Orphan account column - compact avatar + name + OU path */
+.orc-col-orphan { overflow: hidden; }
+.orc-orphan { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.orc-orphan-ico {
+    flex: 0 0 auto;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #eef0fb, #e3e6fa);
+    color: var(--orc-primary);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+}
+.orc-orphan-text { min-width: 0; line-height: 1.15; }
+.orc-orphan-name {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--orc-ink);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.orc-orphan-path {
+    font-size: 10.5px;
+    color: var(--orc-muted);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.orc-orphan-path .fa { font-size: 9.5px; margin-right: 3px; opacity: .65; }
+.orc-done-pill { font-size: 9.5px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+
+/* Soften empty-state dashes so they recede instead of shouting */
+#orc-root .table .text-muted { color: #c2c9d4; }
+
+/* Match-detail cell: readable, wraps fully (no clamp - warnings must show) */
+.orc-detail {
+    max-width: none;
+    font-size: 12px;
+    color: var(--orc-muted);
+    cursor: help;
+    line-height: 1.45;
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+}
+
+/* Confidence accent via left border instead of full-row wash */
+tr.orc-row-high   td:first-child { box-shadow: inset 4px 0 0 #2e9e5b; }
+tr.orc-row-medium td:first-child { box-shadow: inset 4px 0 0 var(--orc-primary); }
+tr.orc-row-low    td:first-child { box-shadow: inset 4px 0 0 #c79a2e; }
+tr.orc-row-amb    td:first-child { box-shadow: inset 4px 0 0 #d9534f; }
+tr.orc-row-done   { opacity: .62; }
+tr.orc-row-done   td:first-child { box-shadow: inset 4px 0 0 #2e9e5b; }
+
+/* DN + detail truncation cells */
+.orc-dn {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+    color: var(--orc-muted);
+    cursor: help;
+}
+
+/* Inline code chips */
+.orc-dn code, #orc-root td code {
+    font-size: 11.5px;
+    background: #eef3f8;
+    border: 1px solid #dde6ef;
+    border-radius: 5px;
+    padding: 2px 6px;
+    color: #28557a;
+}
+
+/* Matched identity cell with avatar */
+.orc-identity { display: flex; align-items: center; gap: 10px; }
+.orc-avatar {
+    flex: 0 0 auto;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--orc-primary), var(--orc-accent));
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; text-transform: uppercase;
+}
+.orc-identity-name { font-weight: 600; font-size: 12.5px; color: var(--orc-ink); line-height: 1.2; }
+.orc-identity-sub  { font-size: 10.5px; color: var(--orc-muted); line-height: 1.2; }
+
+/* ============================ Badges / pills ============================ */
+#orc-root .label {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .3px;
+}
+#orc-root .label-danger  { background-color: #d9534f; color:#fff; }
+#orc-root .label-default { background-color: #e7edf3; color: #5a6b7b; }
+
+/* Numeric score chip - solid colour by score value */
+.orc-score {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 11px;
+    font-weight: 700;
+    font-size: 13px;
+    text-align: center;
+    background-color: #8a93a3;
+    color: #ffffff;
+    white-space: nowrap;
+}
+.orc-score .orc-score-word { font-size: 11px; font-weight: 600; opacity: .92; }
+.orc-score.orc-score-high  { background-color: #1f8a4c; color: #fff; }  /* 80-100 */
+.orc-score.orc-score-med   { background-color: #d98a1f; color: #fff; }  /* 50-79  */
+.orc-score.orc-score-low   { background-color: #d9534f; color: #fff; }  /* below 50 */
+.orc-score.orc-score-none  { background-color: #c2c9d2; color: #fff; }
+
+/* Ambiguity flag under the confidence band */
+.orc-amb-flag { color: #c79a2e; font-size: 11px; font-weight: 600; margin-top: 3px; }
+
+/* Per-row warnings inside the match-detail cell */
+.orc-warn-list { margin-top: 5px; }
+.orc-warn { color: #b5862a; font-size: 11px; line-height: 1.4; }
+.orc-warn .fa { margin-right: 4px; }
+/* strategy badge - subtle outline */
+#orc-root td .label-default.orc-strategy,
+.orc-strategy {
+    background: #eef3f8 !important;
+    color: #3d5066 !important;
+    border: 1px solid #dbe5ef;
+    font-weight: 600;
+}
+
+/* Action buttons - uniform, bright, full-width within a roomy column */
+#orc-root .btn-xs { border-radius: 7px; padding: 7px 10px; font-size: 12px; font-weight: 700; }
+#orc-root .btn-success { background: #22a85a; color: #fff; }
+#orc-root .btn-success:hover { background: #1c8d4b; }
+#orc-root .btn-primary { background: #2f6bff; }
+#orc-root .btn-primary:hover { background: #1f57e0; }
+.orc-action-stack {
+    display: flex; flex-direction: column; gap: 6px;
+    align-items: stretch; width: 100%; max-width: 210px; margin: 0 auto;
+}
+#orc-root .orc-action-stack .btn-xs {
+    width: 100%;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: center;
+    min-height: 34px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    box-shadow: 0 1px 2px rgba(30,40,90,.12);
+}
+
+.orc-approval-pending {
+    background-color: #eaf3f8;
+    color: #2c6c8c;
+    border: 1px solid #cfe5ef;
+    font-size: 10.5px;
+    padding: 4px 9px;
+}
+
+/* ============================ Bulk select ============================ */
+/* Narrow select column: just a small checkbox, minimal padding (override the
+   default 12px cell padding so it doesn't waste horizontal space). */
+#orc-root .table > thead > tr > th.orc-cbcol,
+#orc-root .table > tbody > tr > td.orc-cbcol {
+    padding-left: 8px;
+    padding-right: 0;
+    text-align: center;
+}
+.orc-cbcol input { cursor: pointer; transform: scale(1.05); margin: 0; }
+/* Let the orphan cell hug the checkbox column instead of a wide gap. */
+#orc-root .table > thead > tr > th.orc-col-orphan,
+#orc-root .table > tbody > tr > td.orc-col-orphan { padding-left: 6px; }
+.orc-bulkbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    background: #eef0fb; border: 1px solid #d8d9f2; border-left: 3px solid var(--orc-primary);
+    border-radius: var(--orc-radius); padding: 10px 14px; margin-bottom: 10px;
+}
+.orc-bulk-info { font-size: 13px; color: var(--orc-ink); }
+.orc-bulk-info .fa { color: var(--orc-primary); margin-right: 6px; }
+.orc-bulk-info strong { font-size: 15px; }
+.orc-bulk-actions { display: flex; gap: 8px; }
+.orc-bulk-toast {
+    background: #e7f6ee; border: 1px solid #c7e6d3; color: #1f6b3b;
+    border-radius: var(--orc-radius); padding: 9px 14px; margin-bottom: 10px; font-size: 13px;
+    position: relative;
+}
+.orc-bulk-toast .fa { margin-right: 6px; }
+.orc-toast-x { position: absolute; right: 12px; top: 7px; color: #1f6b3b; font-size: 17px; text-decoration: none; font-weight: 700; }
+
+/* Approval-sent toast: blue/info variant */
+.orc-approval-toast { background: #e8f0fe; border-color: #c5d8f7; color: #2a4d8f; }
+.orc-approval-toast .orc-toast-x { color: #2a4d8f; }
+
+/* ============================ Empty state ============================ */
+.orc-empty { text-align: center; padding: 36px 0; color: var(--orc-muted); }
+.orc-empty .fa { color: #2e9e5b; }
+.orc-empty .lead { margin-top: 14px; color: var(--orc-ink); }
+
+/* ============================ Modals ============================ */
+.modal-backdrop { z-index: 1040; }
+.modal { z-index: 1050; }
+#orc-root + .modal .modal-content,
+.modal .modal-content { border-radius: var(--orc-radius); border: none; box-shadow: 0 12px 40px rgba(20,40,70,.25); }
+.modal .modal-header { border-bottom: 1px solid var(--orc-line); }
+.modal .modal-title .fa { color: var(--orc-primary); margin-right: 7px; }
+.orc-confirm-th {
+    width: 140px;
+    color: var(--orc-muted);
+    font-weight: 600;
+    background-color: #f7f9fc;
+}
+
+/* ============================ Nav icon (snippet) ============================ */
+.orc-nav-icon { color: #cfe3f2; }
+.orc-nav-icon:hover { color: #fff; }
+
+/* small-screen */
+@media (max-width: 900px) {
+    .orc-stats { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+    #orc-app-select { min-width: 100%; }
+    .orc-toolbar { gap: 8px; }
+    .orc-stats { grid-template-columns: 1fr; }
+}
+
+/* Greyed, non-clickable "Sent for Approval" state (an approval already pending) */
+.orc-sent-btn[disabled] {
+    opacity: .7;
+    cursor: not-allowed;
+    color: #5a6b7b;
+    background: #eef0f3;
+    border-color: #dbe1e8;
+}
+
+/* ---- Chunked scan progress ---- */
+.orc-scan-progress { margin: 10px 0 4px; }
+.orc-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #3a4757;
+}
+.orc-progress-row .orc-scan-stop { margin-left: auto; }
+.orc-progress-track {
+    margin-top: 6px;
+    height: 8px;
+    background: #eef0f3;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.orc-progress-bar {
+    height: 100%;
+    background: #5b54e0;
+    border-radius: 4px;
+    transition: width .2s ease;
+}
+
+/* ---- Results pager ---- */
+.orc-pager {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 6px 4px;
+}
+.orc-pager-size { font-size: 12px; color: #3a4757; display: flex; align-items: center; gap: 6px; }
+.orc-pager-size select { width: auto; display: inline-block; }
+.orc-pager-info { font-size: 12px; color: #3a4757; }
+.orc-pager-btns { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.orc-pager-btns .btn { min-width: 30px; }
+
+/* ---- Matched-identity deep link ---- */
+.orc-identity-name a { color: var(--orc-primary); text-decoration: none; }
+.orc-identity-name a:hover { text-decoration: underline; }
+.orc-ext-link { font-size: 10px; color: var(--orc-muted); margin-left: 4px; }
+
+/* ============================ Compact post-scan header ============================ */
+.orc-resulthdr {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px;
+    padding: 14px 20px;
+}
+.orc-resulthdr-title { margin: 0; font-size: 17px; font-weight: 700; color: var(--orc-ink); }
+.orc-resulthdr-sub { margin: 3px 0 0; font-size: 13px; color: var(--orc-muted); }
+.orc-resulthdr-sub strong { color: var(--orc-ink); }
+.orc-resulthdr-meta { color: #9aa3af; }
+.orc-resulthdr-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.orc-resulthdr-actions select { width: auto; min-width: 220px; }
+
+/* ============================ KPI cards ============================ */
+.orc-kpis {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px;
+}
+.orc-kpi {
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); padding: 16px 18px;
+    border-left: 4px solid #c2c9d2;
+}
+.orc-kpi-val { font-size: 26px; font-weight: 700; color: var(--orc-ink); line-height: 1; font-variant-numeric: tabular-nums; }
+.orc-kpi-lbl { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--orc-muted); }
+.orc-kpi-matched    { border-left-color: #1f8a4c; }
+.orc-kpi-unresolved { border-left-color: #d9534f; }
+.orc-kpi-service    { border-left-color: #8a93a3; }
+
+/* ============================ Outcome bar ============================ */
+.orc-outcomebar {
+    background: #fff; border: 1px solid var(--orc-line); border-radius: var(--orc-radius);
+    box-shadow: var(--orc-shadow); padding: 14px 18px; margin-bottom: 16px;
+}
+.orc-outcomebar-track {
+    display: flex; height: 12px; border-radius: 7px; overflow: hidden;
+    background: #eef0f4; box-shadow: inset 0 0 0 1px var(--orc-line);
+}
+.orc-seg { height: 100%; transition: width .4s ease; }
+.orc-seg-matched    { background: #1f8a4c; }
+.orc-seg-unresolved { background: #d9534f; }
+.orc-seg-service    { background: #8a93a3; }
+.orc-outcomebar-legend {
+    display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px;
+    font-size: 12.5px; color: var(--orc-muted);
+}
+.orc-outcomebar-legend b { color: var(--orc-ink); font-variant-numeric: tabular-nums; }
+.orc-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 5px; vertical-align: middle; }
+.orc-dot-matched    { background: #1f8a4c; }
+.orc-dot-unresolved { background: #d9534f; }
+.orc-dot-service    { background: #8a93a3; }
+.orc-strat-list { margin-left: auto; color: #9aa3af; }
+.orc-strat-list b { color: var(--orc-ink); }
+
+@media (max-width: 900px) {
+    .orc-kpis { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ============================ Match-reason clamp (2 lines + tooltip) ============================ */
+.orc-detail-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.4;
+}
+
+/* Keep the row action on a single line */
+#orc-root .orc-action-stack .btn { white-space: nowrap; }

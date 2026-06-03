@@ -1,0 +1,654 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<sailpoint>
+
+<!--
+    Orphan Correlation Approval Workflow
+
+    Launched by the OrphanCorrelatorResource REST endpoint when an admin
+    clicks "Send for Approval" on an orphan account match.
+
+    Flow:
+        Start
+          |
+          v
+        Validate Inputs (script) - looks up the matched identity's manager
+          |
+          v
+        Manager Approval (Approval step)
+          - Creates an IIQ work item owned by the manager
+          - Workflow SUSPENDS here until the manager approves or rejects
+          - On approval -> 'approved' variable becomes true
+          |
+          v
+        Check Decision (script transition)
+          - If approved=true  -> Correlate Account
+          - Else              -> Reject
+          |
+          v
+        Correlate Account (script) - link.setIdentity() + save + commit
+          |
+          v
+        Notify Admin (script) - emails the admin who initiated the request
+          |
+          v
+        Stop
+
+    Type = "IdentityUpdate" so that IIQ stores task results and renders the
+    work item in the Approvals tab correctly. (Subprocess type does NOT
+    persist task results, which makes debugging painful.)
+-->
+
+<Workflow explicitTransitions="true"
+          libraries="Identity"
+          name="Workflow-OrphanCorrelationApproval"
+          type="IdentityUpdate">
+
+  <Description>
+    Manager approval workflow for orphan account correlation. Launched
+    programmatically by the OrphanCorrelator plugin. Creates an
+    Approval work item for the matched identity's line manager; on
+    approval, performs link.setIdentity() to complete the correlation.
+  </Description>
+
+  <!-- =================================================================
+       Workflow variables
+       All input from the REST endpoint comes in via Workflower.launch().
+       'approved' is populated automatically by IIQ from the work item.
+       ================================================================= -->
+
+  <Variable input="true" name="orcNativeIdentity">
+    <Description>Native identity (sAMAccountName) of the orphan account.</Description>
+  </Variable>
+
+  <Variable input="true" name="orcApplicationName">
+    <Description>IIQ application name the orphan link lives on (e.g. "Active Directory").</Description>
+  </Variable>
+
+  <Variable input="true" name="orcIdentityName">
+    <Description>Name of the matched identity to correlate to.</Description>
+  </Variable>
+
+  <Variable input="true" name="orcIdentityDisplay">
+    <Description>Display name of the matched identity (for messages).</Description>
+  </Variable>
+
+  <Variable input="true" name="orcStrategy">
+    <Description>Fuzzy match strategy that found this match.</Description>
+  </Variable>
+
+  <Variable input="true" name="orcScore">
+    <Description>Match score 0-100 from the weighted scoring engine.</Description>
+  </Variable>
+
+  <Variable input="true" name="orcMatchDetail">
+    <Description>Human-readable description of why the match was made.</Description>
+  </Variable>
+
+  <Variable input="true" name="orcRequestedBy">
+    <Description>Name of the admin who initiated the approval request.</Description>
+  </Variable>
+
+  <!-- Resolved during workflow execution -->
+  <Variable name="managerName">
+    <Description>Name of the line manager who will own the work item.</Description>
+  </Variable>
+
+  <!-- Short account summary (status, last login, sample access) for the manager. -->
+  <Variable name="orcAccountSummary">
+    <Description>Human-readable summary of the orphan account so the manager can decide.</Description>
+  </Variable>
+
+  <!-- Set by the Approval step automatically when the manager actions the work item -->
+  <Variable name="approved">
+    <Description>Boolean set by IIQ when the manager Approves or Rejects.</Description>
+  </Variable>
+
+  <!-- Manager's comment captured by the Approval AfterScript (approve or reject). -->
+  <Variable name="orcDecisionComments">
+    <Description>Free-text comment the manager entered when approving/rejecting.</Description>
+  </Variable>
+
+  <!-- Result tracking -->
+  <Variable name="correlationSuccess">
+    <Description>Whether the correlation step succeeded.</Description>
+  </Variable>
+
+  <Variable initializer="false" name="trace">
+    <Description>If true, workflow trace is written to stdout for debugging.</Description>
+  </Variable>
+
+  <!-- =================================================================
+       STEP 1: Start
+       ================================================================= -->
+  <Step icon="Start" name="Start" posX="20" posY="120">
+    <Transition to="Validate Inputs"/>
+  </Step>
+
+  <!-- =================================================================
+       STEP 2: Validate Inputs - resolves the matched identity's manager
+       ================================================================= -->
+  <Step name="Validate Inputs" posX="140" posY="120">
+    <Script>
+      <Source><![CDATA[
+        import sailpoint.object.Identity;
+        import org.apache.log4j.Logger;
+
+        Logger log = Logger.getLogger("com.orphancorrelator.workflow.OrphanCorrelationApproval");
+
+        log.info("OrphanCorrelationApproval: validate inputs."
+                 + " nativeIdentity=[" + orcNativeIdentity + "]"
+                 + " applicationName=[" + orcApplicationName + "]"
+                 + " identityName=[" + orcIdentityName + "]"
+                 + " requestedBy=[" + orcRequestedBy + "]");
+
+        // When a manager can't be resolved, route the approval to the REQUESTER
+        // (orcRequestedBy) - a real user who exists in this environment and who
+        // initiated the request - instead of a hardcoded account. "spadmin" is only
+        // an absolute last resort if no requester was somehow passed. This keeps the
+        // plugin portable: it never assumes a client has an account named "spadmin".
+        String fallbackApprover = (orcRequestedBy != null && orcRequestedBy.length() > 0)
+                                  ? orcRequestedBy : "spadmin";
+
+        if (orcIdentityName == null || orcIdentityName.length() == 0) {
+            log.error("OrphanCorrelationApproval: orcIdentityName is null. Routing approval to requester ["
+                     + fallbackApprover + "].");
+            managerName = fallbackApprover;
+            return;
+        }
+
+        Identity matched = context.getObjectByName(Identity.class, orcIdentityName);
+        if (matched == null) {
+            log.warn("OrphanCorrelationApproval: identity [" + orcIdentityName
+                     + "] not found. Routing approval to requester [" + fallbackApprover + "].");
+            managerName = fallbackApprover;
+            return;
+        }
+
+        Identity manager = matched.getManager();
+        if (manager == null) {
+            log.warn("OrphanCorrelationApproval: identity [" + orcIdentityName
+                     + "] has no manager. Routing approval to requester [" + fallbackApprover + "].");
+            managerName = fallbackApprover;
+        } else {
+            managerName = manager.getName();
+            log.info("OrphanCorrelationApproval: resolved manager [" + managerName
+                     + "] for matched identity [" + orcIdentityName + "].");
+        }
+
+        if (matched != null) { context.decache(matched); }
+
+        // Build the account summary via the shared rule (for the result email).
+        // The on-screen work item uses the same rule from its description Arg.
+        orcAccountSummary = "(account detail unavailable)";
+        try {
+            sailpoint.object.Rule sumRule = context.getObjectByName(sailpoint.object.Rule.class, "Rule-OrphanAccountSummary");
+            if (sumRule != null) {
+                java.util.HashMap ra = new java.util.HashMap();
+                ra.put("nativeIdentity", orcNativeIdentity);
+                ra.put("applicationName", orcApplicationName);
+                Object res = context.runRule(sumRule, ra);
+                if (res != null && res.toString().length() > 0) { orcAccountSummary = res.toString(); }
+            }
+        } catch (Exception sex) {
+            log.warn("OrphanCorrelationApproval: account summary build failed. " + sex.getMessage());
+        }
+      ]]></Source>
+    </Script>
+    <Transition to="Manager Approval"/>
+  </Step>
+
+  <!-- =================================================================
+       STEP 3: Manager Approval
+       This is where IIQ creates the WorkItem owned by 'managerName'
+       and SUSPENDS until the manager approves or rejects it.
+       ================================================================= -->
+  <Step icon="Approval" name="Manager Approval" posX="280" posY="120">
+    <!-- Resolve the approval owner via an INLINE owner="script:..." expression.
+         This is the only owner form IIQ honours here: a child <Owner><Script>
+         is ignored, and owner="ref:var" fails because a variable set in an
+         earlier <Script> step does NOT propagate to the approval - both left
+         the owner null, which makes IIQ auto-approve with no work item.
+         Rules: matched identity's manager if present and not the requester;
+         otherwise the ServiceAccount-Approvers workgroup (a real approver,
+         never the launcher - routing to the launcher would self-approve). -->
+    <Approval mode="serial"
+              return="approved"
+              owner="script:import sailpoint.object.Identity; String o=null; if(orcIdentityName!=null){ Identity m=context.getObjectByName(Identity.class,orcIdentityName); if(m!=null){ if(m.getManager()!=null) o=m.getManager().getName(); context.decache(m);} } if(o==null || o.equals(orcRequestedBy)) o=&quot;ServiceAccount-Approvers&quot;; return o;"
+              send="orcNativeIdentity,orcApplicationName,orcIdentityName,orcIdentityDisplay,orcStrategy,orcScore,orcMatchDetail,orcAccountSummary">
+      <Arg name="workItemType" value="Approval"/>
+      <!-- Build the description with a Script so the account summary is resolved
+           HERE (at work-item creation) from the launch inputs + the Link. A
+           step-set variable like orcAccountSummary does NOT propagate into the
+           approval's $()-substituted value (see owner comment above), which is
+           why the prior $(orcAccountSummary) rendered empty. Forum-confirmed
+           pattern: set workItemDescription via a Script Arg. -->
+      <Arg name="workItemDescription">
+        <Script>
+          <Source><![CDATA[
+            import sailpoint.object.*;
+            import java.util.*;
+            String base = "Approve correlation of orphan account [" + orcNativeIdentity
+                          + "] to identity [" + orcIdentityDisplay + "]";
+            String summary = "";
+            try {
+                Rule sumRule = context.getObjectByName(Rule.class, "Rule-OrphanAccountSummary");
+                if (sumRule != null) {
+                    HashMap ra = new HashMap();
+                    ra.put("nativeIdentity", orcNativeIdentity);
+                    ra.put("applicationName", orcApplicationName);
+                    Object res = context.runRule(sumRule, ra);
+                    if (res != null) { summary = res.toString(); }
+                }
+            } catch (Exception e) { /* fall back to base description */ }
+            return (summary != null && summary.length() > 0) ? (base + " -- " + summary) : base;
+          ]]></Source>
+        </Script>
+      </Arg>
+      <Arg name="workItemNotificationTemplate"
+           value="Orphan Correlation Approval Request"/>
+      <Arg name="workItemRequester" value="ref:orcRequestedBy"/>
+      <!-- Capture the manager's approve/reject comment into orcDecisionComments
+           so it can be audited and emailed back to the admin. -->
+      <AfterScript>
+        <Source><![CDATA[
+          try {
+              if (item != null && item.getCompletionComments() != null) {
+                  orcDecisionComments = item.getCompletionComments();
+              }
+          } catch (Throwable t) { /* comment capture is best-effort */ }
+        ]]></Source>
+      </AfterScript>
+    </Approval>
+    <Transition to="Correlate Account">
+      <Script>
+        <Source><![CDATA[
+          return Boolean.TRUE.equals(approved);
+        ]]></Source>
+      </Script>
+    </Transition>
+    <Transition to="Reject Correlation"/>
+  </Step>
+
+  <!-- =================================================================
+       STEP 4a: Correlate Account (APPROVED branch)
+       ================================================================= -->
+  <Step name="Correlate Account" posX="440" posY="60">
+    <Script>
+      <Source><![CDATA[
+        import sailpoint.object.Identity;
+        import sailpoint.object.Link;
+        import sailpoint.object.QueryOptions;
+        import sailpoint.object.Filter;
+        import sailpoint.object.WorkItem;
+        import org.apache.log4j.Logger;
+        import java.util.Iterator;
+
+        Logger log = Logger.getLogger("com.orphancorrelator.workflow.OrphanCorrelationApproval");
+
+        correlationSuccess = Boolean.FALSE;
+
+        if (orcNativeIdentity == null || orcApplicationName == null || orcIdentityName == null) {
+            log.error("OrphanCorrelationApproval: missing required variables for correlation.");
+            return;
+        }
+
+        Identity matchedIdentity = null;
+        Link orphanLink          = null;
+
+        try {
+            matchedIdentity = context.getObjectByName(Identity.class, orcIdentityName);
+            if (matchedIdentity == null) {
+                log.error("OrphanCorrelationApproval: identity not found: [" + orcIdentityName + "]");
+                return;
+            }
+            // L1/L3: re-verify the target is still a real (correlated) identity at
+            // approval time - it may have changed between request and approval. Also
+            // closes the duplicate-approval race: if a concurrent case already
+            // correlated this account, the orphan-link re-check below finds nothing
+            // and aborts, so correlation can never happen twice.
+            if (!Boolean.TRUE.equals(matchedIdentity.isCorrelated())) {
+                log.warn("OrphanCorrelationApproval: target identity [" + orcIdentityName
+                         + "] is no longer correlated. Aborting correlation.");
+                return;
+            }
+
+            // An orphan in this plugin's model is a Link OWNED BY A DUMMY
+            // (identity != null AND identity.correlated == false) - NOT a Link
+            // with a null identity. Using Filter.isnull("identity") here matched
+            // zero rows, so the approval branch never correlated anything. We
+            // mirror the scan()/correlateOne() definition instead: still owned by
+            // an uncorrelated dummy. If it has since been re-correlated (by
+            // aggregation or another admin), it no longer matches and we abort.
+            QueryOptions qo = new QueryOptions();
+            qo.addFilter(Filter.eq("nativeIdentity", orcNativeIdentity));
+            qo.addFilter(Filter.eq("application.name", orcApplicationName));
+            qo.addFilter(Filter.notnull("identity"));
+            qo.addFilter(Filter.eq("identity.correlated", Boolean.FALSE));
+
+            Iterator linkIter = context.search(Link.class, qo);
+            try {
+                if (linkIter != null && linkIter.hasNext()) {
+                    orphanLink = (Link) linkIter.next();
+                }
+            } finally {
+                sailpoint.tools.Util.flushIterator(linkIter);
+            }
+
+            if (orphanLink == null) {
+                // Link may have been correlated by aggregation or another admin
+                // between approval request and approval action. Log loud and abort.
+                log.warn("OrphanCorrelationApproval: orphan link [" + orcNativeIdentity
+                         + "] on [" + orcApplicationName
+                         + "] no longer owned by an uncorrelated dummy. Aborting to avoid stomping on existing correlation.");
+                return;
+            }
+
+            // Capture the dummy owner BEFORE repointing so we can clean it up after.
+            String dummyName = (orphanLink.getIdentity() != null)
+                    ? orphanLink.getIdentity().getName() : null;
+
+            orphanLink.setIdentity(matchedIdentity);
+            context.saveObject(orphanLink);
+            context.saveObject(matchedIdentity);
+            context.commitTransaction();
+
+            correlationSuccess = Boolean.TRUE;
+
+            log.info("OrphanCorrelationApproval: correlated [" + orcNativeIdentity
+                     + "] to identity [" + orcIdentityName + "] via manager approval.");
+
+            // Delete the emptied dummy if safe - mirrors the REST correlateOne()/
+            // isSafeToDeleteDummy() logic so the approval and direct paths behave
+            // identically. A cleanup failure must NOT flip correlationSuccess (the
+            // correlation already committed), so this runs in its own try/catch.
+            try {
+                if (dummyName != null) {
+                    Identity dummy = context.getObjectByName(Identity.class, dummyName);
+                    boolean deleted = false;
+                    if (dummy != null && Boolean.FALSE.equals(dummy.isCorrelated())) {
+                        QueryOptions remQo = new QueryOptions();
+                        remQo.addFilter(Filter.eq("identity.name", dummyName));
+                        int remaining = context.countObjects(Link.class, remQo);
+                        if (remaining == 0) {
+                            boolean safe = true;
+                            QueryOptions mgrQo = new QueryOptions();
+                            mgrQo.addFilter(Filter.eq("manager.name", dummyName));
+                            if (context.countObjects(Identity.class, mgrQo) > 0) { safe = false; }
+                            if (safe) {
+                                QueryOptions wiOwnerQo = new QueryOptions();
+                                wiOwnerQo.addFilter(Filter.eq("owner.name", dummyName));
+                                if (context.countObjects(WorkItem.class, wiOwnerQo) > 0) { safe = false; }
+                            }
+                            if (safe) {
+                                QueryOptions wiReqQo = new QueryOptions();
+                                wiReqQo.addFilter(Filter.eq("requester.name", dummyName));
+                                if (context.countObjects(WorkItem.class, wiReqQo) > 0) { safe = false; }
+                            }
+                            if (safe) {
+                                log.info("OrphanCorrelationApproval: deleting empty dummy [" + dummyName + "].");
+                                context.removeObject(dummy);
+                                context.commitTransaction();
+                                deleted = true;
+                            } else {
+                                log.warn("OrphanCorrelationApproval: dummy [" + dummyName
+                                         + "] has 0 links but owns other relationships (manager/work items). Skipping deletion.");
+                            }
+                        }
+                    }
+                    if (dummy != null && !deleted) { try { context.decache(dummy); } catch (Exception ignore) {} }
+                }
+            } catch (Exception delEx) {
+                log.warn("OrphanCorrelationApproval: dummy cleanup failed for [" + dummyName
+                         + "] (correlation already succeeded). " + delEx.getMessage());
+            }
+
+            // #1 record the APPROVED decision as a native IIQ AuditEvent.
+            try {
+                sailpoint.object.AuditEvent ev = new sailpoint.object.AuditEvent();
+                ev.setSource(orcRequestedBy != null ? orcRequestedBy : "OrphanCorrelator");
+                ev.setAction("OrphanCorrelate");
+                ev.setTarget(orcNativeIdentity);
+                ev.setApplication(orcApplicationName);
+                ev.setString1(orcIdentityName);
+                ev.setString2(orcScore);
+                ev.setString3("Approved by manager via workflow"
+                        + (orcDecisionComments != null ? (". Comment: " + orcDecisionComments) : ""));
+                context.saveObject(ev);
+                context.commitTransaction();
+            } catch (Exception aex) {
+                log.warn("OrphanCorrelationApproval: approval audit event failed. " + aex.getMessage());
+            }
+
+            // #2 recompute the target cube after correlation (non-blocking).
+            try {
+                sailpoint.object.Attributes rargs = new sailpoint.object.Attributes();
+                rargs.put(sailpoint.api.Identitizer.ARG_PROMOTE_ATTRIBUTES,     Boolean.TRUE);
+                rargs.put(sailpoint.api.Identitizer.ARG_CORRELATE_ENTITLEMENTS, Boolean.TRUE);
+                rargs.put(sailpoint.api.Identitizer.ARG_REFRESH_LINKS,          Boolean.TRUE);
+                sailpoint.api.Identitizer idz = new sailpoint.api.Identitizer(context, rargs);
+                idz.setRefreshSource(sailpoint.object.Source.Workflow, "OrphanCorrelator");
+                Identity toRefresh = context.getObjectByName(Identity.class, orcIdentityName);
+                if (toRefresh != null) { idz.refresh(toRefresh); context.commitTransaction(); context.decache(toRefresh); }
+            } catch (Exception rex) {
+                log.warn("OrphanCorrelationApproval: post-approval refresh failed for ["
+                         + orcIdentityName + "]. " + rex.getMessage());
+            }
+
+        } catch (Exception ex) {
+            log.error("OrphanCorrelationApproval: correlation failed for ["
+                      + orcNativeIdentity + "]. Error: " + ex.getMessage());
+        } finally {
+            if (orphanLink      != null) { try { context.decache(orphanLink);      } catch (Exception ignore) {} }
+            if (matchedIdentity != null) { try { context.decache(matchedIdentity); } catch (Exception ignore) {} }
+        }
+      ]]></Source>
+    </Script>
+    <Transition to="Notify Admin"/>
+  </Step>
+
+  <!-- =================================================================
+       STEP 4b: Reject Correlation (REJECTED branch)
+       ================================================================= -->
+  <Step name="Reject Correlation" posX="440" posY="180">
+    <Script>
+      <Source><![CDATA[
+        import org.apache.log4j.Logger;
+        Logger log = Logger.getLogger("com.orphancorrelator.workflow.OrphanCorrelationApproval");
+        correlationSuccess = Boolean.FALSE;
+        log.info("OrphanCorrelationApproval: manager REJECTED correlation of ["
+                 + orcNativeIdentity + "] to identity [" + orcIdentityName
+                 + "]. Account remains uncorrelated.");
+
+        // #1 record the REJECTED decision (and the manager's reason) for audit.
+        try {
+            sailpoint.object.AuditEvent ev = new sailpoint.object.AuditEvent();
+            ev.setSource(orcRequestedBy != null ? orcRequestedBy : "OrphanCorrelator");
+            ev.setAction("OrphanCorrelateRejected");
+            ev.setTarget(orcNativeIdentity);
+            ev.setApplication(orcApplicationName);
+            ev.setString1(orcIdentityName);
+            ev.setString2(orcScore);
+            ev.setString3("Rejected by manager"
+                    + (orcDecisionComments != null ? (". Comment: " + orcDecisionComments) : ""));
+            context.saveObject(ev);
+            context.commitTransaction();
+        } catch (Exception aex) {
+            log.warn("OrphanCorrelationApproval: reject audit event failed. " + aex.getMessage());
+        }
+      ]]></Source>
+    </Script>
+    <Transition to="Notify Admin"/>
+  </Step>
+
+  <!-- =================================================================
+       STEP 5: Notify Admin (shared by both branches)
+       ================================================================= -->
+  <Step name="Notify Admin" posX="600" posY="120">
+    <Script>
+      <Source><![CDATA[
+        import sailpoint.object.Identity;
+        import sailpoint.object.EmailTemplate;
+        import sailpoint.object.EmailOptions;
+        import org.apache.log4j.Logger;
+        import java.util.HashMap;
+
+        Logger log = Logger.getLogger("com.orphancorrelator.workflow.OrphanCorrelationApproval");
+
+        if (orcRequestedBy == null) {
+            log.warn("OrphanCorrelationApproval: no orcRequestedBy - skipping admin notification.");
+            return;
+        }
+
+        Identity admin = null;
+        try {
+            admin = context.getObjectByName(Identity.class, orcRequestedBy);
+            if (admin == null || admin.getEmail() == null) {
+                log.warn("OrphanCorrelationApproval: admin [" + orcRequestedBy
+                         + "] not found or has no email. Skipping notification.");
+                return;
+            }
+
+            EmailTemplate template = context.getObjectByName(EmailTemplate.class,
+                                        "Orphan Correlation Result");
+            if (template == null) {
+                log.warn("OrphanCorrelationApproval: email template [Orphan Correlation"
+                         + " Result] not found. Skipping notification.");
+                return;
+            }
+
+            boolean managerApproved = Boolean.TRUE.equals(approved);
+            boolean correlated      = Boolean.TRUE.equals(correlationSuccess);
+
+            String decision = managerApproved ? "APPROVED" : "REJECTED";
+            String outcome;
+            if (managerApproved && correlated) {
+                outcome = "Correlation completed successfully.";
+            } else if (managerApproved) {
+                outcome = "Manager approved but correlation failed or could not be applied - check logs.";
+            } else {
+                outcome = "Manager rejected. Account remains uncorrelated.";
+            }
+
+            HashMap args = new HashMap();
+            args.put("adminDisplayName",    admin.getDisplayName());
+            args.put("nativeIdentity",      orcNativeIdentity);
+            args.put("identityDisplayName", orcIdentityDisplay);
+            args.put("decision",            decision);
+            args.put("outcome",             outcome);
+            args.put("strategy",            orcStrategy);
+            args.put("score",               orcScore);
+            args.put("comments",            (orcDecisionComments != null) ? orcDecisionComments : "(none)");
+
+            EmailOptions opts = new EmailOptions(admin.getEmail(), args);
+            context.sendEmailNotification(template, opts);
+
+            log.info("OrphanCorrelationApproval: result notification sent to admin ["
+                     + orcRequestedBy + "] decision=[" + decision + "]");
+
+        } catch (Exception ex) {
+            log.error("OrphanCorrelationApproval: admin notification failed. Error: " + ex.getMessage());
+        } finally {
+            if (admin != null) { try { context.decache(admin); } catch (Exception ignore) {} }
+        }
+      ]]></Source>
+    </Script>
+    <Transition to="Stop"/>
+  </Step>
+
+  <Step icon="Stop" name="Stop" posX="740" posY="120"/>
+
+</Workflow>
+
+  <!-- =====================================================================
+       Shared helper: builds the orphan-account summary (status, last login,
+       sample access) shown in the approval work item and email. Called from the
+       Approval workItemDescription Arg (so it resolves at work-item-creation
+       time, NOT via a step-set variable which does not propagate to the
+       approval) and from the Validate step (for the email). Inputs:
+       nativeIdentity, applicationName. Returns a one-line String ("" if none).
+       ===================================================================== -->
+  <Rule language="beanshell" name="Rule-OrphanAccountSummary">
+    <Description>Builds a one-line orphan-account summary (status, last login, sample access) for the orphan correlation approval. Inputs: nativeIdentity, applicationName.</Description>
+    <Signature returnType="String">
+      <Inputs>
+        <Argument name="nativeIdentity" type="String"/>
+        <Argument name="applicationName" type="String"/>
+      </Inputs>
+      <Returns>
+        <Argument name="summary" type="String"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import sailpoint.object.*;
+      import java.util.*;
+
+      if (nativeIdentity == null || applicationName == null) { return ""; }
+
+      QueryOptions lqo = new QueryOptions();
+      lqo.addFilter(Filter.eq("nativeIdentity", nativeIdentity));
+      lqo.addFilter(Filter.eq("application.name", applicationName));
+      Iterator lit = context.search(Link.class, lqo);
+      Link lk = null;
+      try { if (lit != null && lit.hasNext()) { lk = (Link) lit.next(); } }
+      finally { sailpoint.tools.Util.flushIterator(lit); }
+      if (lk == null) { return ""; }
+
+      StringBuilder sum = new StringBuilder();
+      sum.append("Status: ").append(lk.isDisabled() ? "Disabled" : (lk.isLocked() ? "Locked" : "Active"));
+
+      // Last login: only show genuinely human-readable values. Skip "0" (AD
+      // lastLogon of 0 = never) and raw FILETIME numbers - they read as noise.
+      String[] llAttrs = { "lastLogon", "lastLogin", "lastLogonTimestamp", "lastSignIn", "pwdLastSet" };
+      for (int i = 0; i < llAttrs.length; i++) {
+          Object v = lk.getAttribute(llAttrs[i]);
+          if (v != null) {
+              String s = v.toString().trim();
+              boolean dateLike = (s.indexOf('-') >= 0 || s.indexOf('/') >= 0 || s.indexOf(':') >= 0);
+              if (s.length() > 0 && !s.equals("0") && dateLike) {
+                  sum.append(" | Last login: ").append(s);
+              }
+              break;
+          }
+      }
+
+      // Access: show the group NAME (leading RDN of a DN, e.g. CN=Finance_RW,... ->
+      // Finance_RW), comma-separated, capped at 6 with a "+N more" tail.
+      Attributes ents = lk.getEntitlementAttributes();
+      if (ents != null && !ents.isEmpty()) {
+          int MAX_SHOWN = 6;
+          int total = 0;
+          List names = new ArrayList();
+          for (Iterator ki = ents.keySet().iterator(); ki.hasNext(); ) {
+              Object val = ents.get(ki.next());
+              List vals = (val instanceof List) ? (List) val : Collections.singletonList(val);
+              for (int j = 0; j < vals.size(); j++) {
+                  if (vals.get(j) == null) { continue; }
+                  total++;
+                  if (names.size() < MAX_SHOWN) {
+                      String e = vals.get(j).toString().trim();
+                      int comma = e.indexOf(',');
+                      String first = (comma > 0) ? e.substring(0, comma) : e;
+                      int eq = first.indexOf('=');
+                      if (eq >= 0) { first = first.substring(eq + 1); }
+                      names.add(first.trim());
+                  }
+              }
+          }
+          if (total > 0) {
+              StringBuilder eb = new StringBuilder();
+              for (int i = 0; i < names.size(); i++) {
+                  if (eb.length() > 0) { eb.append(", "); }
+                  eb.append(names.get(i));
+              }
+              if (total > names.size()) { eb.append(", +").append(total - names.size()).append(" more"); }
+              sum.append(" | Access: ").append(eb.toString());
+          }
+      }
+
+      context.decache(lk);
+      return sum.toString();
+    ]]></Source>
+  </Rule>
+
+</sailpoint>

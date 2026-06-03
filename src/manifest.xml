@@ -1,0 +1,178 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Plugin PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Plugin certificationLevel="None"
+        displayName="Orphan Account Correlator"
+        minSystemVersion="8.1"
+        name="OrphanCorrelator"
+        version="1.0.0">
+  <Attributes>
+    <Map>
+      <entry key="minUpgradableVersion" value="1.0"/>
+
+      <!-- Full page UI accessible at /plugins/pluginPage.jsf?pn=OrphanCorrelator -->
+      <entry key="fullPage">
+        <value>
+          <FullPage title="Orphan Account Correlator"/>
+        </value>
+      </entry>
+
+      <!-- REST resource class -->
+      <entry key="restResources">
+        <value>
+          <List>
+            <String>com.orphancorrelator.plugin.correlator.OrphanCorrelatorResource</String>
+          </List>
+        </value>
+      </entry>
+
+      <!-- Configurable settings shown on the plugin Configure page -->
+      <entry key="settings">
+        <value>
+          <List>
+            <Setting dataType="string"
+                     name="applicationName"
+                     label="Default Application"
+                     helpText="Default application shown in the plugin UI dropdown. The UI lets users pick any application at scan time."
+                     defaultValue=""/>
+
+            <!-- ===== Generic matching configuration =====================
+                 The engine resolves each logical field from the FIRST non-empty
+                 account attribute in these comma-separated candidate lists, then
+                 matches against STANDARD identity attributes only (email, name,
+                 firstname, lastname, displayName). Tune per environment - no code
+                 changes needed for AD, LDAP, JDBC, SCIM, etc. -->
+            <Setting dataType="string"
+                     name="emailAccountAttributes"
+                     label="Account Email Attributes"
+                     helpText="Candidate account attributes holding the email, matched to standard Identity.email. First non-empty wins."
+                     defaultValue="email,mail,emailAddress,email_address,workEmail,userPrincipalName,upn"/>
+            <Setting dataType="string"
+                     name="loginAccountAttributes"
+                     label="Account Login Attributes"
+                     helpText="Candidate account attributes holding the login/username, matched to standard Identity.name. Falls back to the CN of the DN."
+                     defaultValue="accountName,sAMAccountName,uid,userName,user_name,userid,login,user,cn"/>
+            <Setting dataType="string"
+                     name="firstNameAccountAttributes"
+                     label="Account First-Name Attributes"
+                     helpText="Candidate account attributes holding the given/first name, matched to standard Identity.firstname."
+                     defaultValue="firstname,firstName,first_name,givenName,givenname,fname"/>
+            <Setting dataType="string"
+                     name="lastNameAccountAttributes"
+                     label="Account Last-Name Attributes"
+                     helpText="Candidate account attributes holding the surname/last name, matched to standard Identity.lastname."
+                     defaultValue="lastname,lastName,last_name,sn,surname,familyName,lname"/>
+            <Setting dataType="string"
+                     name="displayNameAccountAttributes"
+                     label="Account Display-Name Attributes"
+                     helpText="Candidate account attributes holding the display/full name, matched to standard Identity.displayName."
+                     defaultValue="displayName,displayname,fullName,fullname,full_name,cn,name"/>
+            <Setting dataType="string"
+                     name="upnAccountAttributes"
+                     label="Account UPN Attributes"
+                     helpText="Candidate account attributes holding the UPN, matched against Identity.email (exact and local-part). First non-empty wins."
+                     defaultValue="userPrincipalName,upn,onPremisesUserPrincipalName"/>
+            <Setting dataType="string"
+                     name="employeeIdAccountAttributes"
+                     label="Account Employee-ID Attributes"
+                     helpText="Candidate account attributes holding the employee ID/number. Only scored when an identity-side employee-ID attribute is also configured below."
+                     defaultValue="employeeID,employeeId,employeeNumber,employee_number,emp_no,staff_number,personnelNumber"/>
+            <Setting dataType="string"
+                     name="departmentAccountAttributes"
+                     label="Account Department Attributes"
+                     helpText="Candidate account attributes holding the department (supporting signal). Leave blank to disable."
+                     defaultValue="department,dept,departmentName"/>
+            <Setting dataType="string"
+                     name="companyAccountAttributes"
+                     label="Account Company Attributes"
+                     helpText="Candidate account attributes holding the company/organisation (supporting signal). Leave blank to disable."
+                     defaultValue="company,companyName,organisation,organization,org"/>
+            <Setting dataType="string"
+                     name="managerAccountAttributes"
+                     label="Account Manager Attributes"
+                     helpText="Candidate account attributes holding the manager name/email (supporting signal). Compared against the identity's manager."
+                     defaultValue="manager,managerName,manager_email,managerEmail"/>
+            <Setting dataType="string"
+                     name="serviceAccountPatterns"
+                     label="Service-Account Name Patterns"
+                     helpText="Comma-separated WHOLE-TOKEN patterns that flag non-human (service/bot) accounts. Applies a scoring PENALTY (-25). The login is split on non-alphanumeric boundaries and a pattern matches only a complete token (so 'sa' matches the 'sa' account, not 'sam'). Leave blank to disable."
+                     defaultValue="svc,sa,bot,service,system,slack,app,batch,robot,integration,api,daemon,noreply"/>
+            <Setting dataType="string"
+                     name="adminAccountPatterns"
+                     label="Admin/Privileged Account Patterns"
+                     helpText="Comma-separated WHOLE-TOKEN patterns that flag privileged accounts. Applies a scoring PENALTY (-20). Leave blank to disable."
+                     defaultValue="admin,adm,priv,pua,pa,elevated,root,superuser,sudo"/>
+            <Setting dataType="string"
+                     name="testAccountPatterns"
+                     label="Test-Account Name Patterns"
+                     helpText="Comma-separated WHOLE-TOKEN patterns that flag test / non-production accounts (separate from service accounts). Applies a lighter scoring PENALTY (-15) and labels the row as a test-account match. Leave blank to disable."
+                     defaultValue="test,tst,qa,uat,demo,sample,dummy,training,sandbox"/>
+
+            <!-- ===== Identity-side STRONG attributes (optional) =============
+                 Names of SEARCHABLE Identity attributes to use as strong match
+                 signals. Leave blank to skip - available-field scoring absorbs
+                 their absence, so the plugin stays generic. employeeId MUST be a
+                 searchable extended attribute (ObjectConfig:Identity) to be used
+                 in candidate retrieval. -->
+            <Setting dataType="string"
+                     name="identityEmployeeIdAttribute"
+                     label="Identity Employee-ID Attribute"
+                     helpText="Name of the searchable Identity attribute holding the employee ID (e.g. employeeId). Strongest signal (weight 30). Blank = not used."
+                     defaultValue=""/>
+            <Setting dataType="string"
+                     name="identityDepartmentAttribute"
+                     label="Identity Department Attribute"
+                     helpText="Name of the Identity attribute holding the department. Supporting signal. Blank = not used."
+                     defaultValue=""/>
+            <Setting dataType="string"
+                     name="identityCompanyAttribute"
+                     label="Identity Company Attribute"
+                     helpText="Name of the Identity attribute holding the company/organisation. Supporting signal. Blank = not used."
+                     defaultValue=""/>
+
+            <!-- ===== Scoring knobs ===== -->
+            <Setting dataType="int"
+                     name="candidateLimit"
+                     label="Max Candidates Per Account"
+                     helpText="Maximum candidate identities retrieved and scored per orphan account. Higher = more thorough but slower. Default 25."
+                     defaultValue="25"/>
+            <Setting dataType="int"
+                     name="matchThreshold"
+                     label="Match Threshold Score"
+                     helpText="Minimum final score (0-100) below which ambiguity is not flagged and a match is considered unreliable. Default 70."
+                     defaultValue="70"/>
+            <Setting dataType="int"
+                     name="ambiguityGap"
+                     label="Ambiguity Gap"
+                     helpText="If the best candidate beats the runner-up by fewer than this many points (and clears the threshold), the result is flagged ambiguous. Default 8."
+                     defaultValue="8"/>
+            <Setting dataType="int"
+                     name="maxScanResults"
+                     label="Max Accounts Per Scan"
+                     helpText="Maximum orphan accounts processed in a single SYNCHRONOUS scan. A scan runs in-request and fires several candidate queries per orphan, so a large value can time out the browser and pin a server thread. Default 1000; the UI warns when the cap is hit so you can narrow scope (e.g. by application). For very large populations, run scans off-hours or in smaller batches."
+                     defaultValue="1000"/>
+          </List>
+        </value>
+      </entry>
+
+      <!-- Snippet: inject nav icon into every IIQ page.
+           IMPORTANT: do NOT load correlator.css here. That stylesheet restyles
+           Bootstrap classes (.table, .modal, .label, .btn) and is meant ONLY for
+           the plugin's full page, which loads it itself via a <link> in page.xhtml.
+           Loading it globally corrupts native IIQ pages (e.g. certifications).
+           header.js styles its single nav icon inline, so no global CSS is needed. -->
+      <entry key="snippets">
+        <value>
+          <List>
+            <Snippet regexPattern=".*" rightRequired="ViewOrphanCorrelator">
+              <Scripts>
+                <String>ui/js/snippets/header.js</String>
+              </Scripts>
+            </Snippet>
+          </List>
+        </value>
+      </entry>
+
+    </Map>
+  </Attributes>
+</Plugin>
+

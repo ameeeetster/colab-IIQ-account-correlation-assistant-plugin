@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Orphan Correlator Plugin - Build Script
+
+    Compiles the Java sources under src/ into lib/OrphanCorrelator.jar
+    and packages the full plugin as OrphanCorrelatorPlugin.zip.
+
+    USAGE
+    =====
+    1. Set the IIQ_HOME property below to the path of your IIQ web app
+       installation (the directory that contains WEB-INF/lib). On the
+       lab this is typically:
+         C:\\Tomcat\\webapps\\identityiq
+
+       Or override on the command line:
+         ant -DIIQ_HOME=C:\\Tomcat\\webapps\\identityiq package
+
+    2. Run:
+         ant clean
+         ant package
+
+    3. The packaged plugin will be at:
+         dist/OrphanCorrelatorPlugin.zip
+
+       Install via IIQ -> Gear -> Plugins -> New -> upload the zip.
+
+    PREREQUISITES
+    =============
+    - Apache Ant 1.9+ on PATH
+    - JDK 1.8 (IIQ 8.x targets Java 8 bytecode)
+    - IIQ web application installed locally (used as classpath source)
+-->
+<project name="OrphanCorrelator" default="package" basedir=".">
+
+    <!-- ============= Properties ============= -->
+
+    <!-- Override on command line: ant -DIIQ_HOME=... -->
+    <property name="IIQ_HOME"    value="C:/Tomcat/webapps/identityiq"/>
+    <property name="plugin.name" value="OrphanCorrelator"/>
+
+    <property name="src.dir"     value="${basedir}/src"/>
+    <property name="build.dir"   value="${basedir}/build"/>
+    <property name="classes.dir" value="${build.dir}/classes"/>
+    <property name="lib.dir"     value="${basedir}/lib"/>
+    <property name="dist.dir"    value="${basedir}/dist"/>
+
+    <!-- IIQ provides identityiq.jar in WEB-INF/lib and the javax.ws.rs API
+         (jersey-core or similar) - all needed for compile -->
+    <property name="iiq.lib.dir" value="${IIQ_HOME}/WEB-INF/lib"/>
+
+    <path id="iiq.classpath">
+        <fileset dir="${iiq.lib.dir}">
+            <include name="**/*.jar"/>
+        </fileset>
+    </path>
+
+    <!-- ============= Targets ============= -->
+
+    <target name="check.iiq" description="Verify IIQ_HOME points to a valid installation">
+        <available file="${iiq.lib.dir}/identityiq.jar" property="iiq.found"/>
+        <fail unless="iiq.found">
+            ===============================================================
+            ERROR: identityiq.jar not found at:
+                ${iiq.lib.dir}/identityiq.jar
+
+            Set the IIQ_HOME property to your IIQ webapp directory:
+                ant -DIIQ_HOME=C:/Tomcat/webapps/identityiq package
+            ===============================================================
+        </fail>
+    </target>
+
+    <target name="clean" description="Remove build artefacts">
+        <delete dir="${build.dir}"/>
+        <delete dir="${dist.dir}"/>
+        <delete dir="${lib.dir}"/>
+    </target>
+
+    <target name="init" depends="check.iiq">
+        <mkdir dir="${classes.dir}"/>
+        <mkdir dir="${lib.dir}"/>
+        <mkdir dir="${dist.dir}"/>
+    </target>
+
+    <target name="compile" depends="init" description="Compile Java sources">
+        <javac srcdir="${src.dir}"
+               destdir="${classes.dir}"
+               source="1.8"
+               target="1.8"
+               includeantruntime="false"
+               encoding="UTF-8"
+               debug="true"
+               deprecation="true">
+            <classpath refid="iiq.classpath"/>
+        </javac>
+    </target>
+
+    <target name="jar" depends="compile" description="Package compiled classes into JAR">
+        <jar destfile="${lib.dir}/${plugin.name}.jar">
+            <fileset dir="${classes.dir}"/>
+            <manifest>
+                <attribute name="Plugin-Name"    value="${plugin.name}"/>
+                <attribute name="Plugin-Version" value="1.0"/>
+            </manifest>
+        </jar>
+    </target>
+
+    <target name="package" depends="jar" description="Build the full plugin .zip">
+        <zip destfile="${dist.dir}/${plugin.name}Plugin.zip">
+            <fileset dir="${basedir}">
+                <include name="manifest.xml"/>
+                <include name="import/**"/>
+                <include name="db/**"/>
+                <include name="ui/**"/>
+                <include name="src/**"/>
+                <include name="lib/**"/>
+            </fileset>
+            <exclude name="build/**"/>
+            <exclude name="dist/**"/>
+        </zip>
+        <echo>===============================================================</echo>
+        <echo>Plugin built: ${dist.dir}/${plugin.name}Plugin.zip</echo>
+        <echo>Install via IIQ -- Gear -- Plugins -- New -- upload .zip</echo>
+        <echo>===============================================================</echo>
+    </target>
+
+</project>
