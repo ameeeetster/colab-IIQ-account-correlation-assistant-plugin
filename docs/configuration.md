@@ -55,6 +55,7 @@ These are the **names of searchable Identity attributes** in your environment. L
 | Setting | Default | Purpose |
 |---|---|---|
 | Max Accounts Per Scan | 1000 | Per-request safety cap. The UI fetches in batches behind a progress bar, so this bounds each individual server request, not the total scan. Lower it if individual requests are too slow; raise it (cautiously) if you want fewer round-trips. |
+| Max Candidates Per Account | 25 | Maximum candidate identities retrieved and scored per orphan account. Higher = more thorough matching but slower scans. Increase this if your identity population has many people sharing similar names/attributes; lower it on large populations if scan time matters more than exhaustive candidate coverage. |
 
 ---
 
@@ -95,14 +96,31 @@ For context when tuning thresholds - the engine uses these fixed weights:
 
 | Penalty | Value |
 |---|---|
-| Employee-ID conflict (different ID) | -40 |
-| Inactive / terminated identity | -30 |
+| Employee-ID conflict (different ID, after leading-zero normalisation) | -40 |
 | Service / bot pattern | -25 |
 | Admin / privileged pattern | -20 |
 | Test account pattern | -15 |
 | No strong identifier available | -10 |
 
-Safeguards: thin-evidence floor caps weak matches at 79; username-only matches capped at 94; final score clamped to 0-100.
+**Inactive identities are not penalised.** As of v2.0.0, a match to an inactive/terminated identity no longer reduces the score - it's flagged with a warning badge in the results table instead, so a correct match to a leaver isn't unfairly buried by a lower confidence label.
+
+Safeguards: thin-evidence floor caps weak matches at `Match Threshold - 5`; any match built from a single signal type (e.g. email only, no corroborating username/name match) is capped at 94 - "Very High" confidence requires at least two independent signals to agree; final score clamped to 0-100.
+
+Additional matching improvements in v2.0.0: employee ID comparison tolerates leading-zero padding differences (`00012345` and `12345` are treated as equivalent); first-name comparison recognises ~70 common English nickname pairs (Bob/Robert, Bill/William, etc.); international name characters (ł, ø, ß, æ, and others) are normalised to their ASCII equivalents before comparison.
+
+---
+
+## Approval routing (new in v2.0.0)
+
+Unlike the settings above, approval routing is **not** configured on the plugin's Configure page - it's chosen per-request in the "Send for Approval" modal, plus one workflow-level setting for the fallback approver.
+
+| What | Where it's set | Notes |
+|---|---|---|
+| Approval target (manager / identity / both) | Chosen by the operator each time they send an account for approval | "Both" runs the matched identity's confirmation first, then the manager's approval, in sequence. |
+| Manager chain walk depth (2 levels) | Fixed in the workflow logic | If the resolved manager is inactive, the workflow escalates to the grandmanager. Not configurable without editing the workflow. |
+| Fallback approver workgroup | `Workflow-OrphanCorrelationApproval` object, variable `orcFallbackApproverGroup` (default: `ServiceAccount-Approvers`) | Used when no active manager can be resolved anywhere in the chain. Edit this workflow variable's initializer to point at a different workgroup name for your environment. **Add at least one member to this workgroup after install** - an empty workgroup can receive the work item but cannot receive email notifications. |
+
+To change the fallback workgroup name: **Debug > Workflow > Workflow-OrphanCorrelationApproval**, find the `orcFallbackApproverGroup` variable, and update its `initializer` value to an existing workgroup in your environment.
 
 ---
 
