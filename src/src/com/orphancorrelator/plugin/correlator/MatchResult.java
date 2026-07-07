@@ -46,8 +46,12 @@ public class MatchResult {
     private String  errorMessage;
     private boolean approvalPending;       // an open manager-approval workflow exists for this account
     private boolean testAccount;           // account name matches a test/non-production pattern
+    private boolean matchedIdentityInactive; // matched identity is inactive (likely a leaver) - flag, not penalty
 
     public MatchResult() {}
+
+    public boolean isMatchedIdentityInactive()           { return matchedIdentityInactive; }
+    public void    setMatchedIdentityInactive(boolean v) { this.matchedIdentityInactive = v; }
 
     public boolean isApprovalPending()               { return approvalPending; }
     public void    setApprovalPending(boolean v)     { this.approvalPending = v; }

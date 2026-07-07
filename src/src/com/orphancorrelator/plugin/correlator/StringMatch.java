@@ -80,11 +80,109 @@ public final class StringMatch {
         return (at >= 0) ? v.substring(0, at) : v;
     }
 
-    /** Remove accents/diacritics (e.g. "José" -> "Jose"). */
+    /**
+     * Remove accents/diacritics (e.g. "José" -> "Jose"). After the NFD strip,
+     * explicit transliterations handle characters NFD cannot decompose
+     * (ł, ø, ß, æ, đ, þ, œ) so European names normalize consistently.
+     */
     public static String stripDiacritics(String s) {
         if (s == null) { return ""; }
         String n = Normalizer.normalize(s, Normalizer.Form.NFD);
-        return n.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        n = n.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        StringBuilder sb = new StringBuilder(n.length());
+        for (int i = 0; i < n.length(); i++) {
+            char c = n.charAt(i);
+            switch (c) {
+                case '\u0142': sb.append('l');  break;  // l-stroke (lowercase)
+                case '\u0141': sb.append('L');  break;  // L-stroke
+                case '\u00F8': sb.append('o');  break;  // o-slash (lowercase)
+                case '\u00D8': sb.append('O');  break;  // O-slash
+                case '\u00DF': sb.append("ss"); break;  // sharp s
+                case '\u00E6': sb.append("ae"); break;  // ae ligature (lowercase)
+                case '\u00C6': sb.append("AE"); break;  // AE ligature
+                case '\u0111': sb.append('d');  break;  // d-stroke (lowercase)
+                case '\u0110': sb.append('D');  break;  // D-stroke
+                case '\u00FE': sb.append("th"); break;  // thorn (lowercase)
+                case '\u00DE': sb.append("TH"); break;  // Thorn
+                case '\u0153': sb.append("oe"); break;  // oe ligature (lowercase)
+                case '\u0152': sb.append("OE"); break;  // OE ligature
+                default:       sb.append(c);    break;
+            }
+        }
+        return sb.toString();
+    }
+
+    // =====================================================================
+    // Nickname canonicalization
+    // =====================================================================
+
+    /** Common English nickname -> canonical given name (all lowercase). */
+    private static final java.util.Map<String, String> NICKNAMES = buildNicknames();
+
+    private static java.util.Map<String, String> buildNicknames() {
+        java.util.Map<String, String> m = new java.util.HashMap<String, String>();
+        m.put("bob", "robert");     m.put("rob", "robert");
+        m.put("bill", "william");   m.put("will", "william");
+        m.put("liz", "elizabeth");  m.put("beth", "elizabeth");  m.put("betty", "elizabeth");
+        m.put("peggy", "margaret"); m.put("meg", "margaret");
+        m.put("jim", "james");      m.put("jamie", "james");
+        m.put("mike", "michael");
+        m.put("dave", "david");
+        m.put("dan", "daniel");     m.put("danny", "daniel");
+        m.put("tom", "thomas");     m.put("tommy", "thomas");
+        m.put("dick", "richard");   m.put("rick", "richard");    m.put("rich", "richard");
+        m.put("tony", "anthony");
+        m.put("andy", "andrew");    m.put("drew", "andrew");
+        m.put("chris", "christopher");
+        m.put("kate", "katherine"); m.put("katie", "katherine"); m.put("kathy", "katherine");
+        m.put("cathy", "catherine");
+        m.put("sue", "susan");      m.put("susie", "susan");
+        m.put("jen", "jennifer");   m.put("jenny", "jennifer");
+        m.put("jess", "jessica");
+        m.put("becky", "rebecca");
+        m.put("alex", "alexander"); m.put("sasha", "alexander");
+        m.put("ted", "theodore");
+        m.put("ed", "edward");      m.put("eddie", "edward");    m.put("ned", "edward");
+        m.put("frank", "francis");
+        m.put("fred", "frederick");
+        m.put("greg", "gregory");
+        m.put("hank", "henry");     m.put("harry", "henry");
+        m.put("jack", "john");      m.put("johnny", "john");
+        m.put("joe", "joseph");     m.put("joey", "joseph");
+        m.put("josh", "joshua");
+        m.put("ken", "kenneth");    m.put("kenny", "kenneth");
+        m.put("larry", "lawrence");
+        m.put("matt", "matthew");
+        m.put("nate", "nathan");
+        m.put("nick", "nicholas");
+        m.put("pat", "patrick");    m.put("patty", "patricia");
+        m.put("pete", "peter");
+        m.put("phil", "philip");
+        m.put("ron", "ronald");     m.put("ronnie", "ronald");
+        m.put("sam", "samuel");
+        m.put("steve", "steven");   m.put("stephen", "steven");
+        m.put("terry", "terence");
+        m.put("tim", "timothy");
+        m.put("vicky", "victoria");
+        m.put("walt", "walter");
+        m.put("zack", "zachary");
+        m.put("abby", "abigail");
+        m.put("allie", "alison");
+        m.put("annie", "anne");
+        m.put("charlie", "charles"); m.put("chuck", "charles");
+        return java.util.Collections.unmodifiableMap(m);
+    }
+
+    /**
+     * Canonical form of a given/first name for equality checks: normName()
+     * then nickname mapping ("Bob" -> "robert"). Returns the normalized input
+     * unchanged when no nickname mapping exists. Null-safe ("" for null).
+     */
+    public static String canonicalFirstName(String s) {
+        String n = normName(s);
+        if (n.isEmpty()) { return n; }
+        String canonical = NICKNAMES.get(n);
+        return (canonical != null) ? canonical : n;
     }
 
     // =====================================================================

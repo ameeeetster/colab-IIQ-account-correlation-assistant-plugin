@@ -7,7 +7,7 @@
 <h:head>
   <title>Orphan Account Correlator</title>
      <link rel="stylesheet" type="text/css"
-           href="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/css/correlator.css?v=1_0_0"/>
+           href="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/css/correlator.css?v=2_0_0"/>
 </h:head>
 <h:body>
 <div ng-controller="OrphanCorrelatorCtrl" id="orc-root">
@@ -345,6 +345,10 @@
                   </div>
                   <div class="orc-identity-sub">{{ r.matchedIdentityName }}</div>
                   <div class="orc-identity-sub" ng-if="r.matchedIdentityEmail">{{ r.matchedIdentityEmail }}</div>
+                  <div ng-if="r.matchedIdentityInactive" class="orc-amb-flag"
+                       title="The matched identity is inactive - this account likely belongs to a leaver">
+                    <i class="fa fa-user-times"></i> Inactive identity
+                  </div>
                 </div>
               </div>
               <span ng-if="!r.matchedIdentityName" class="text-muted">&mdash;</span>
@@ -547,13 +551,28 @@
       <div class="modal-content">
         <div class="modal-header">
           <button type="button" class="close" ng-click="cancelApprovalRequest()" ng-disabled="requestingApproval">&times;</button>
-          <h4 class="modal-title"><i class="fa fa-paper-plane-o"></i> Send for Manager Approval</h4>
+          <h4 class="modal-title"><i class="fa fa-paper-plane-o"></i> Send for Approval</h4>
         </div>
         <div class="modal-body">
-          <p class="text-muted" style="margin-bottom:16px;" ng-if="!approvalSent">
+          <div ng-if="!approvalSent" style="margin-bottom:12px;">
+            <label style="font-weight:600;">Send approval to:</label>
+            <select class="form-control" ng-model="approvalTarget"
+                    ng-options="o.value as o.label for o in approvalTargetOptions"
+                    ng-disabled="requestingApproval"
+                    style="margin-top:4px;">
+            </select>
+          </div>
+          <p class="text-muted" style="margin-bottom:16px;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'manager'">
             A work item will be sent to the matched identity's line manager.
             The account will only be correlated after the manager approves.
-            You will receive an email with the outcome.
+          </p>
+          <p class="text-muted" style="margin-bottom:16px;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'identity'">
+            A work item will be sent to the matched identity to confirm account ownership.
+            The account will only be correlated after they confirm.
+          </p>
+          <p class="text-muted" style="margin-bottom:16px;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'both'">
+            The matched identity will first be asked to confirm ownership, then
+            their manager must approve the correlation. Both must approve.
           </p>
           <table class="table table-condensed table-bordered" ng-if="!approvalSent">
             <tr><th class="orc-confirm-th">Orphan account</th><td><code>{{ pendingApprovalRequest.nativeIdentity }}</code></td></tr>
@@ -562,17 +581,28 @@
             <tr><th class="orc-confirm-th">Score</th><td><span class="orc-score" ng-class="scoreClass(pendingApprovalRequest)">{{ pendingApprovalRequest.score }}</span> / 100
                 <span ng-if="pendingApprovalRequest.ambiguous" class="orc-amb-flag"><i class="fa fa-exclamation-triangle"></i> Ambiguous</span></td></tr>
           </table>
-          <div class="alert alert-info" style="margin-bottom:0;" ng-if="!approvalSent">
+          <div class="alert alert-info" style="margin-bottom:0;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'manager'">
             <i class="fa fa-info-circle"></i>
             <strong>The line manager will:</strong> receive an email notification and see a work item
             in their IIQ Approvals inbox. Correlation happens only on their approval.
+          </div>
+          <div class="alert alert-info" style="margin-bottom:0;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'identity'">
+            <i class="fa fa-info-circle"></i>
+            <strong>The matched identity will:</strong> receive a work item asking them to confirm
+            this is their account. Correlation happens only after they confirm.
+          </div>
+          <div class="alert alert-info" style="margin-bottom:0;" ng-if="!approvalSent &amp;&amp; approvalTarget === 'both'">
+            <i class="fa fa-info-circle"></i>
+            <strong>Step 1:</strong> The matched identity confirms ownership.
+            <strong>Step 2:</strong> Their manager approves the correlation.
+            Both must approve for the account to be linked.
           </div>
           <!-- Success confirmation: modal stays open so the user always sees it. -->
           <div class="alert alert-success" style="margin-bottom:0;" ng-if="approvalSent">
             <i class="fa fa-check-circle"></i>
             <strong>Sent for approval.</strong> A work item and email notification have gone to
             <strong>{{ approvalSent.manager }}</strong> for <strong>{{ approvalSent.account }}</strong>.
-            The account will be correlated only after they approve - you'll get an email with the outcome.
+            The account will be correlated only after all required approvals are completed. You'll get an email with the outcome.
           </div>
           <div class="alert alert-danger" ng-if="approvalRequestError" style="margin-top:10px;">
             <i class="fa fa-times-circle"></i> {{ approvalRequestError }}
@@ -597,10 +627,10 @@
      load AngularJS on plugin pages, so the plugin provides its own copy and no
      longer depends on the host. Must load BEFORE correlator.js. -->
 <script type="text/javascript"
-  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/lib/angular.min.js?v=1_0_0">
+  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/lib/angular.min.js?v=2_0_0">
 </script>
 <script type="text/javascript"
-  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/correlator.js?v=1_0_0">
+  src="#{plugins.requestContextPath}/plugin/OrphanCorrelator/ui/js/correlator.js?v=2_0_0">
 </script>
 </h:body>
 </html>

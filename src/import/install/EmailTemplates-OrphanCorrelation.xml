@@ -3,92 +3,272 @@
 <sailpoint>
 
   <!--
-      Sent to the matched identity's line manager when an admin requests
-      their approval before correlating an orphan account.
+      Sent to the work item owner (line manager, fallback workgroup, or the
+      matched identity for the confirmation step) when an approval work item
+      is opened by Workflow-OrphanCorrelationApproval.
 
-      Variables provided by Workflow-OrphanCorrelationApproval (Manager
-      Approval step, via the workItemNotificationTemplate Arg):
-        nativeIdentity, applicationName, identityName, identityDisplayName,
-        strategy, confidence, matchDetail
+      Variables provided by the workflow via the Approval step's `send` list:
+        orcNativeIdentity, orcApplicationName, orcIdentityName,
+        orcIdentityDisplay, orcStrategy, orcScore, orcMatchDetail,
+        orcAccountSummary
+      Plus the standard work item notification context ($item = the WorkItem).
+
+      The Review buttons use the DOCUMENTED direct work item link mechanism
+      (IIQ 8.5 Lifecycle Manager guide, "Using Direct Work Item Links in Email
+      Templates"): $spTools.formatURL('/ui/index.jsf#/commonWorkItem')/$item.id.
+      The base URL comes from Global Settings > IdentityIQ Settings >
+      Notification Settings > Server Root Path - nothing is hardcoded here.
+      If $item is unavailable, the buttons fall back to the My Work landing
+      page via the same Server Root Path mechanism.
+
+      HTML is table-based with inline styles only - email clients do not
+      reliably support CSS classes or stylesheets.
   -->
   <EmailTemplate name="Orphan Correlation Approval Request">
     <Description>
-      Sent to the line manager of a matched identity when an admin requests
-      their approval before correlating an orphan account.
+      Sent to the approval work item owner (manager, fallback workgroup, or
+      the matched identity) when an admin requests approval before
+      correlating an orphan account.
     </Description>
-    <!-- No <From> — IIQ uses the system sender configured in Global Settings → Notifications -->
+    <!-- No <From> - IIQ uses the system sender configured in Global Settings > Notifications -->
     <Subject>Action Required: Orphan Account Correlation Approval for ${orcIdentityDisplay}</Subject>
     <Body><![CDATA[
-Hello,
+<html>
+<body style="margin:0;padding:0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7;padding:24px 0;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border:1px solid #d9dce1;border-radius:4px;font-family:Arial,Helvetica,sans-serif;color:#333333;">
 
-An IdentityIQ administrator has asked you to approve linking an uncorrelated
-account to one of your direct reports. Nothing is changed until you approve.
+        <!-- Header bar -->
+        <tr>
+          <td style="background-color:#0d4f8b;padding:18px 24px;border-radius:4px 4px 0 0;">
+            <span style="color:#ffffff;font-size:18px;font-weight:bold;">Orphan Account Correlation &#8212; Approval Required</span>
+          </td>
+        </tr>
 
-==================================================
- ACCOUNT TO BE LINKED
-==================================================
- Orphan account : ${orcNativeIdentity}
- Application    : ${orcApplicationName}
+        <tr>
+          <td style="padding:20px 24px 8px 24px;font-size:14px;line-height:1.5;">
+            An IdentityIQ administrator has asked you to approve linking an uncorrelated
+            account to <strong>${orcIdentityDisplay}</strong>. Nothing changes until you decide.
+          </td>
+        </tr>
 
-==================================================
- SUGGESTED IDENTITY
-==================================================
- Name           : ${orcIdentityDisplay}
- Login          : ${orcIdentityName}
+        <!-- Account section -->
+        <tr>
+          <td style="padding:12px 24px 0 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+              <tr>
+                <td style="background-color:#eef2f6;padding:8px 12px;font-weight:bold;border:1px solid #d9dce1;" colspan="2">Account</td>
+              </tr>
+              <tr>
+                <td width="35%" style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Orphan account</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;"><strong>${orcNativeIdentity}</strong></td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Application</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${orcApplicationName}</td>
+              </tr>
+#if($orcAccountSummary)
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Details</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${orcAccountSummary}</td>
+              </tr>
+#end
+            </table>
+          </td>
+        </tr>
 
-==================================================
- MATCH CONFIDENCE
-==================================================
- Score          : ${orcScore} / 100
- Reason         : ${orcMatchDetail}
+        <!-- Suggested identity section -->
+        <tr>
+          <td style="padding:12px 24px 0 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+              <tr>
+                <td style="background-color:#eef2f6;padding:8px 12px;font-weight:bold;border:1px solid #d9dce1;" colspan="2">Suggested identity</td>
+              </tr>
+              <tr>
+                <td width="35%" style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Name</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;"><strong>${orcIdentityDisplay}</strong></td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Login</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${orcIdentityName}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
---------------------------------------------------
- WHAT TO DO
---------------------------------------------------
- 1. Log in to IdentityIQ.
- 2. Go to My Work  >  Approvals.
- 3. Open this request. The full account details (status, last login and
-    sample access) are shown on the work item.
- 4. Approve to link the account to ${orcIdentityDisplay}, or Reject if it
-    does not belong to them.
+        <!-- Confidence section: colored badge. $orcScore is a numeric STRING
+             (unpadded, 0-100) so the tier is derived with String methods only -
+             Velocity cannot reliably compare a String against a number. -->
+        <tr>
+          <td style="padding:12px 24px 0 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+              <tr>
+                <td style="background-color:#eef2f6;padding:8px 12px;font-weight:bold;border:1px solid #d9dce1;" colspan="2">Confidence</td>
+              </tr>
+              <tr>
+                <td width="35%" style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Score</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">
+#if($orcScore == "100" || ($orcScore.length() == 2 && ($orcScore.startsWith("8") || $orcScore.startsWith("9"))))
+                  <span style="display:inline-block;background-color:#2e7d32;color:#ffffff;padding:3px 10px;border-radius:10px;font-weight:bold;">${orcScore} / 100 &#8212; High</span>
+#elseif($orcScore.length() == 2 && ($orcScore.startsWith("5") || $orcScore.startsWith("6") || $orcScore.startsWith("7")))
+                  <span style="display:inline-block;background-color:#ef6c00;color:#ffffff;padding:3px 10px;border-radius:10px;font-weight:bold;">${orcScore} / 100 &#8212; Medium</span>
+#else
+                  <span style="display:inline-block;background-color:#c62828;color:#ffffff;padding:3px 10px;border-radius:10px;font-weight:bold;">${orcScore} / 100 &#8212; Low</span>
+#end
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Why</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${orcMatchDetail}</td>
+              </tr>
+#if($orcStrategy)
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Match strategy</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${orcStrategy}</td>
+              </tr>
+#end
+            </table>
+          </td>
+        </tr>
 
-The account is linked ONLY after you approve. If you reject, nothing changes.
+        <!-- Action buttons: both deep-link to the SAME work item page; the
+             decision itself is made there (no unauthenticated action links). -->
+        <tr>
+          <td align="center" style="padding:24px 24px 8px 24px;">
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+#if($item && $item.id)
+                <td style="padding-right:12px;">
+                  <a href="$spTools.formatURL('/ui/index.jsf#/commonWorkItem')/$item.id"
+                     style="display:inline-block;background-color:#2e7d32;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:4px;font-size:14px;font-weight:bold;">Review &amp; Approve</a>
+                </td>
+                <td>
+                  <a href="$spTools.formatURL('/ui/index.jsf#/commonWorkItem')/$item.id"
+                     style="display:inline-block;background-color:#c62828;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:4px;font-size:14px;font-weight:bold;">Review &amp; Decline</a>
+                </td>
+#else
+                <td style="padding-right:12px;">
+                  <a href="$spTools.formatURL('/workitem/workItems.jsf')"
+                     style="display:inline-block;background-color:#2e7d32;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:4px;font-size:14px;font-weight:bold;">Review &amp; Approve</a>
+                </td>
+                <td>
+                  <a href="$spTools.formatURL('/workitem/workItems.jsf')"
+                     style="display:inline-block;background-color:#c62828;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:4px;font-size:14px;font-weight:bold;">Review &amp; Decline</a>
+                </td>
+#end
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 24px 16px 24px;font-size:12px;color:#888888;">
+            You will be asked to sign in. The decision is made on the work item page.
+          </td>
+        </tr>
 
-This is an automated message from the Orphan Account Correlator.]]></Body>
+        <tr>
+          <td style="padding:12px 24px 20px 24px;border-top:1px solid #e3e6ea;font-size:12px;color:#888888;line-height:1.5;">
+            The account is linked ONLY after you approve; if you reject, nothing changes.
+            This is an automated message from the Orphan Account Correlator.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>]]></Body>
   </EmailTemplate>
 
   <!--
       Sent to the admin who initiated the approval request, after the
-      manager has approved or rejected. Variables provided by the
-      Notify Admin step in the workflow.
+      approver has approved or rejected. Variables provided by the
+      Notify Admin step in the workflow: adminDisplayName, nativeIdentity,
+      identityDisplayName, decision, outcome, strategy, score, comments.
   -->
   <EmailTemplate name="Orphan Correlation Result">
     <Description>
-      Sent to the requesting admin after the manager approves or rejects
+      Sent to the requesting admin after the approver approves or rejects
       an orphan account correlation request.
     </Description>
-    <!-- No <From> — IIQ uses the system sender configured in Global Settings → Notifications -->
+    <!-- No <From> - IIQ uses the system sender configured in Global Settings > Notifications -->
     <Subject>Orphan Correlation ${decision}: ${nativeIdentity} -- ${identityDisplayName}</Subject>
     <Body><![CDATA[
-Hello ${adminDisplayName},
+<html>
+<body style="margin:0;padding:0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7;padding:24px 0;">
+  <tr>
+    <td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border:1px solid #d9dce1;border-radius:4px;font-family:Arial,Helvetica,sans-serif;color:#333333;">
 
-A manager has responded to your orphan account correlation approval request.
+        <!-- Header bar -->
+        <tr>
+          <td style="background-color:#0d4f8b;padding:18px 24px;border-radius:4px 4px 0 0;">
+            <span style="color:#ffffff;font-size:18px;font-weight:bold;">Orphan Account Correlation &#8212; Decision</span>
+          </td>
+        </tr>
 
---- Summary ---
-Account:          ${nativeIdentity}
-Matched Identity: ${identityDisplayName}
-Match Score:      ${score}/100
-Decision:         ${decision}
-Manager Comment:  ${comments}
+        <tr>
+          <td style="padding:20px 24px 8px 24px;font-size:14px;line-height:1.5;">
+            Hello ${adminDisplayName},<br/><br/>
+            Your orphan account correlation approval request has been actioned.
+          </td>
+        </tr>
 
---- Outcome ---
-${outcome}
+        <!-- Outcome banner -->
+        <tr>
+          <td style="padding:8px 24px 0 24px;">
+#if($decision == "APPROVED")
+            <div style="background-color:#e8f5e9;border:1px solid #2e7d32;color:#2e7d32;padding:12px 16px;border-radius:4px;font-size:14px;font-weight:bold;">APPROVED &#8212; ${outcome}</div>
+#else
+            <div style="background-color:#fdecea;border:1px solid #c62828;color:#c62828;padding:12px 16px;border-radius:4px;font-size:14px;font-weight:bold;">${decision} &#8212; ${outcome}</div>
+#end
+          </td>
+        </tr>
 
-If the decision was REJECTED, the account remains uncorrelated and you
-may wish to investigate further.
+        <!-- Summary section -->
+        <tr>
+          <td style="padding:16px 24px 0 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+              <tr>
+                <td style="background-color:#eef2f6;padding:8px 12px;font-weight:bold;border:1px solid #d9dce1;" colspan="2">Summary</td>
+              </tr>
+              <tr>
+                <td width="35%" style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Account</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;"><strong>${nativeIdentity}</strong></td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Matched identity</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${identityDisplayName}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Match score</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${score} / 100</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;color:#666666;">Comments</td>
+                <td style="padding:8px 12px;border:1px solid #d9dce1;">${comments}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
-This is an automated notification from the Orphan Account Correlator.
-    ]]></Body>
+        <tr>
+          <td style="padding:16px 24px 20px 24px;border-top:1px solid #e3e6ea;font-size:12px;color:#888888;line-height:1.5;">
+            If the decision was REJECTED, the account remains uncorrelated and you may wish to
+            investigate further. This is an automated notification from the Orphan Account Correlator.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>]]></Body>
   </EmailTemplate>
 
 </sailpoint>

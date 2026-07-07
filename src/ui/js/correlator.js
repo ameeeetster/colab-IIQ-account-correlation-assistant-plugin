@@ -119,10 +119,23 @@
            matched = has identity & non-service (includes ambiguous); unresolved =
            non-service with no identity; ambiguous = subset of matched. */
         function isServiceRow(r)  { return r.strategy === 'Service/Bot'; }
-        $scope.countMatched    = function () { return $scope.results.filter(function (r) { return !isServiceRow(r) && !!r.matchedIdentityName; }).length; };
-        $scope.countUnresolved = function () { return $scope.results.filter(function (r) { return !isServiceRow(r) && !r.matchedIdentityName; }).length; };
-        $scope.countService    = function () { return $scope.results.filter(isServiceRow).length; };
-        $scope.countAmbiguous  = function () { return $scope.results.filter(function (r) { return r.ambiguous; }).length; };
+        $scope._counts = { matched: 0, unresolved: 0, service: 0, ambiguous: 0 };
+        function recomputeCounts() {
+            var m = 0, u = 0, s = 0, a = 0;
+            var arr = $scope.results;
+            for (var i = 0; i < arr.length; i++) {
+                var r = arr[i], svc = isServiceRow(r);
+                if (svc) { s++; }
+                else if (r.matchedIdentityName) { m++; }
+                else { u++; }
+                if (r.ambiguous) { a++; }
+            }
+            $scope._counts = { matched: m, unresolved: u, service: s, ambiguous: a };
+        }
+        $scope.countMatched    = function () { return $scope._counts.matched; };
+        $scope.countUnresolved = function () { return $scope._counts.unresolved; };
+        $scope.countService    = function () { return $scope._counts.service; };
+        $scope.countAmbiguous  = function () { return $scope._counts.ambiguous; };
 
         $scope.toggleFilters = function () { $scope.showFilters = !$scope.showFilters; };
         $scope.clearFilters = function () {
@@ -229,6 +242,8 @@
             sortByBestMatch();
             try { $scope.scannedAt = new Date().toLocaleString(); } catch (e) { $scope.scannedAt = ''; }
             recalcSummary();
+            recomputeCounts();
+            $scope._filterKey = '';
             $scope.scanRun = true;
             $scope.scanning = false;
             $scope.scanCancelled = $scope.scanCancel;
@@ -273,7 +288,9 @@
             return true;
         }
 
-        $scope.filteredResults = function () {
+        $scope._filteredCache = [];
+        $scope._filterKey = '';
+        function computeFilteredResults() {
             var f = $scope.filters, af = $scope.activeFilter;
             return $scope.results.filter(function (r) {
                 if (!inCategory(r, af)) { return false; }
@@ -291,6 +308,19 @@
                 if (f.detail && !contains(r.matchDetail, f.detail)) { return false; }
                 return true;
             });
+        }
+        function filterCacheKey() {
+            var f = $scope.filters;
+            return $scope.results.length + '|' + $scope.activeFilter + '|'
+                + f.account + '|' + f.identity + '|' + f.strategy + '|' + f.detail + '|' + f.confidence;
+        }
+        $scope.filteredResults = function () {
+            var key = filterCacheKey();
+            if (key !== $scope._filterKey) {
+                $scope._filteredCache = computeFilteredResults();
+                $scope._filterKey = key;
+            }
+            return $scope._filteredCache;
         };
 
         /* ---- Results table paging (render one page of filtered rows) ---- */
@@ -625,7 +655,13 @@
         };
 
         /* ---- Approval request flow ---- */
-        $scope.openApprovalRequest = function (r) { $scope.pendingApprovalRequest = r; $scope.approvalRequestError = null; $scope.requestingApproval = false; $scope.approvalSent = null; };
+        $scope.approvalTargetOptions = [
+            { value: 'manager',  label: 'Manager only' },
+            { value: 'identity', label: 'Identity only' },
+            { value: 'both',     label: 'Both (identity confirms, then manager approves)' }
+        ];
+        $scope.approvalTarget = 'manager';
+        $scope.openApprovalRequest = function (r) { $scope.pendingApprovalRequest = r; $scope.approvalRequestError = null; $scope.requestingApproval = false; $scope.approvalSent = null; $scope.approvalTarget = 'manager'; };
         $scope.cancelApprovalRequest = function () { if ($scope.requestingApproval) { return; } $scope.pendingApprovalRequest = null; $scope.approvalRequestError = null; $scope.approvalSent = null; };
         $scope.doRequestApproval = function () {
             if (!$scope.pendingApprovalRequest || $scope.requestingApproval) { return; }
@@ -634,16 +670,19 @@
             var payload = {
                 nativeIdentity: r.nativeIdentity, applicationName: r.applicationName,
                 identityName: r.matchedIdentityName, strategy: r.strategy,
-                score: String(r.score), matchDetail: r.matchDetail, displayName: r.displayName
+                score: String(r.score), matchDetail: r.matchDetail, displayName: r.displayName,
+                approvalTarget: $scope.approvalTarget || 'manager'
             };
             $http.post(BASE + '/request-approval', payload)
                 .then(function (res) {
                     var row = $scope.results.find(function (result) { return result.nativeIdentity === payload.nativeIdentity; });
                     if (row) { row.approvalStatus = 'pending'; row.approvalManager = res.data.managerDisplay || res.data.managerName; }
+                    var target = res.data.approvalTarget || $scope.approvalTarget || 'manager';
                     var mgr = res.data.managerDisplay || res.data.managerName || 'the line manager';
-                    // Keep the modal OPEN and show a success state (don't null
-                    // pendingApprovalRequest) so the user always sees confirmation.
-                    $scope.approvalSent = { manager: mgr, account: (r.displayName || r.nativeIdentity) };
+                    var sentTo = (target === 'identity') ? (r.matchedIdentityDisplayName || r.matchedIdentityName)
+                               : (target === 'both') ? (r.matchedIdentityDisplayName || r.matchedIdentityName) + ' and then ' + mgr
+                               : mgr;
+                    $scope.approvalSent = { manager: sentTo, account: (r.displayName || r.nativeIdentity), target: target };
                     $scope.approvalToast = { account: (r.displayName || r.nativeIdentity), manager: mgr };
                     $scope.requestingApproval = false;
                 })

@@ -282,19 +282,276 @@ public class OrphanCorrelatorResource extends BasePluginResource {
                 Util.flushIterator(idIter);
             }
 
-            int count = 0;
+            // ---- Phase 1: load orphan links and extract account profiles ----
+            List<Link> orphanLinks = new ArrayList<Link>();
+            List<String[]> profiles = new ArrayList<String[]>();
+            // Profile indices: 0=email, 1=upn, 2=login, 3=first, 4=last, 5=display, 6=empId, 7=dept, 8=company, 9=manager
+            String cfgEmailAttrs   = setting(SETTING_EMAIL_ATTRS,   DEF_EMAIL_ATTRS);
+            String cfgUpnAttrs     = setting(SETTING_UPN_ATTRS,     DEF_UPN_ATTRS);
+            String cfgLoginAttrs   = setting(SETTING_LOGIN_ATTRS,   DEF_LOGIN_ATTRS);
+            String cfgFirstAttrs   = setting(SETTING_FIRST_ATTRS,   DEF_FIRST_ATTRS);
+            String cfgLastAttrs    = setting(SETTING_LAST_ATTRS,    DEF_LAST_ATTRS);
+            String cfgDisplayAttrs = setting(SETTING_DISPLAY_ATTRS, DEF_DISPLAY_ATTRS);
+            String cfgEmpIdAttrs   = setting(SETTING_EMPID_ATTRS,   DEF_EMPID_ATTRS);
+            String cfgDeptAttrs    = setting(SETTING_DEPT_ATTRS,    DEF_DEPT_ATTRS);
+            String cfgCompanyAttrs = setting(SETTING_COMPANY_ATTRS, DEF_COMPANY_ATTRS);
+            String cfgManagerAttrs = setting(SETTING_MANAGER_ATTRS, DEF_MANAGER_ATTRS);
+            String idEmpAttr  = trimToNull(getSettingString(SETTING_ID_EMPID_ATTR));
+            String idDeptAttr = trimToNull(getSettingString(SETTING_ID_DEPT_ATTR));
+            String idCompAttr = trimToNull(getSettingString(SETTING_ID_COMPANY_ATTR));
+
+            Set<String> allEmails   = new HashSet<String>();
+            Set<String> allLogins   = new HashSet<String>();
+            Set<String> allEmpIds   = new HashSet<String>();
+            Set<String> allDisplays = new HashSet<String>();
+            Set<String> allFirstLast = new HashSet<String>();
+
             for (String linkId : linkIds) {
                 Link orphan = null;
                 try {
                     orphan = ctx.getObjectById(Link.class, linkId);
-                    if (orphan == null) { continue; } // re-pointed / removed since the id scan
-                    count++;
-                    log.debug("OrphanCorrelatorResource: processing dummy-owned link ["
-                            + orphan.getNativeIdentity() + "]");
-                    results.add(runFuzzyMatch(ctx, orphan, appName));
                 } catch (Exception ex) {
-                    log.error("OrphanCorrelatorResource: error processing dummy-owned link ["
-                            + (orphan != null ? orphan.getNativeIdentity() : linkId) + "].", ex);
+                    log.warn("OrphanCorrelatorResource: failed to load link [" + linkId + "]. " + ex.getMessage());
+                }
+                if (orphan == null) {
+                    orphanLinks.add(null);
+                    profiles.add(null);
+                    continue;
+                }
+                orphanLinks.add(orphan);
+                String nativeId = orphan.getNativeIdentity();
+                String dn = firstNonEmpty(attr(orphan, "distinguishedName"), nativeId);
+                String acctEmail   = firstAccountValue(orphan, cfgEmailAttrs);
+                String acctUpn     = firstAccountValue(orphan, cfgUpnAttrs);
+                String acctLogin   = firstAccountValue(orphan, cfgLoginAttrs);
+                if (Util.isNullOrEmpty(acctLogin)) { acctLogin = cnFromDn(dn); }
+                String acctFirst   = firstAccountValue(orphan, cfgFirstAttrs);
+                String acctLast    = firstAccountValue(orphan, cfgLastAttrs);
+                String acctDisplay = firstAccountValue(orphan, cfgDisplayAttrs);
+                String acctEmpId   = firstAccountValue(orphan, cfgEmpIdAttrs);
+                String acctDept    = firstAccountValue(orphan, cfgDeptAttrs);
+                String acctCompany = firstAccountValue(orphan, cfgCompanyAttrs);
+                String acctManager = firstAccountValue(orphan, cfgManagerAttrs);
+
+                profiles.add(new String[] { acctEmail, acctUpn, acctLogin, acctFirst, acctLast,
+                        acctDisplay, acctEmpId, acctDept, acctCompany, acctManager });
+
+                if (!Util.isNullOrEmpty(acctEmail))   { allEmails.add(acctEmail.toLowerCase()); }
+                if (!Util.isNullOrEmpty(acctUpn))      { allEmails.add(acctUpn.toLowerCase()); }
+                if (!Util.isNullOrEmpty(acctLogin))    { allLogins.add(acctLogin.toLowerCase()); }
+                if (!Util.isNullOrEmpty(acctEmpId))    { allEmpIds.add(acctEmpId.toLowerCase()); }
+                if (!Util.isNullOrEmpty(acctDisplay))  { allDisplays.add(acctDisplay.toLowerCase()); }
+                if (!Util.isNullOrEmpty(acctFirst) && !Util.isNullOrEmpty(acctLast)) {
+                    allFirstLast.add(acctFirst.toLowerCase() + "|" + acctLast.toLowerCase());
+                }
+            }
+
+            // ---- Phase 2: batch candidate retrieval ----
+            // One bulk query per signal type instead of 7 per orphan.
+            Map<String, Identity> candidatePool = new LinkedHashMap<String, Identity>();
+            // Pool cap scales with the page size so large pages don't starve later
+            // orphans of pool slots (floor of 200 preserves small-page behaviour).
+            int batchQueryLimit = Math.max(200, linkIds.size() * 2);
+
+            // Each batch query is individually guarded: a failed bulk query (e.g.
+            // Filter.ignoreCase(Filter.in(...)) unsupported on a given DB/version)
+            // must degrade to the per-orphan fallback in Phase 3, never 500 the scan.
+            if (!allEmails.isEmpty()) {
+                try {
+                    batchQueryIdentities(ctx, candidatePool, "email", new ArrayList<String>(allEmails), batchQueryLimit);
+                } catch (Exception ex) {
+                    log.warn("OrphanCorrelatorResource: batch email query failed; relying on per-orphan fallback. "
+                             + ex.getMessage());
+                }
+            }
+            if (!allLogins.isEmpty()) {
+                try {
+                    batchQueryIdentities(ctx, candidatePool, "name", new ArrayList<String>(allLogins), batchQueryLimit);
+                } catch (Exception ex) {
+                    log.warn("OrphanCorrelatorResource: batch login/name query failed; relying on per-orphan fallback. "
+                             + ex.getMessage());
+                }
+            }
+            if (!allEmpIds.isEmpty() && !Util.isNullOrEmpty(idEmpAttr)) {
+                try {
+                    batchQueryIdentities(ctx, candidatePool, idEmpAttr, new ArrayList<String>(allEmpIds), batchQueryLimit);
+                } catch (Exception ex) {
+                    log.warn("OrphanCorrelatorResource: batch employeeId query failed (is [" + idEmpAttr
+                             + "] searchable?). Falling back to per-orphan. " + ex.getMessage());
+                }
+            }
+            if (!allDisplays.isEmpty()) {
+                try {
+                    batchQueryIdentities(ctx, candidatePool, "displayName", new ArrayList<String>(allDisplays), batchQueryLimit);
+                } catch (Exception ex) {
+                    log.warn("OrphanCorrelatorResource: batch displayName query failed; relying on per-orphan fallback. "
+                             + ex.getMessage());
+                }
+            }
+            if (!allFirstLast.isEmpty()) {
+                for (String key : allFirstLast) {
+                    String[] parts = key.split("\\|", 2);
+                    if (parts.length == 2) {
+                        try {
+                            List<Identity> fl = queryIdentities(ctx, Filter.and(
+                                    Filter.ignoreCase(Filter.eq("firstname", parts[0])),
+                                    Filter.ignoreCase(Filter.eq("lastname", parts[1]))), null, 10);
+                            for (Identity fli : fl) {
+                                if (fli != null && fli.getName() != null) {
+                                    candidatePool.put(fli.getName(), fli);
+                                }
+                            }
+                        } catch (Exception ex) {
+                            log.warn("OrphanCorrelatorResource: first/last batch query failed for ["
+                                     + key + "]; relying on per-orphan fallback. " + ex.getMessage());
+                        }
+                    }
+                }
+            }
+            // Login prefix queries (token starts-with) — still per-orphan because
+            // prefix LIKE queries can't be meaningfully batched via Filter.in().
+            // But these only fire when earlier queries didn't fill the candidate pool,
+            // so they run infrequently.
+
+            log.info("OrphanCorrelatorResource: batch candidate retrieval loaded "
+                     + candidatePool.size() + " unique candidates from "
+                     + linkIds.size() + " orphans.");
+
+            // ---- Phase 3: score each orphan against pre-fetched candidates ----
+            int candLimit = settingInt(SETTING_CAND_LIMIT, 25);
+            int matchThreshold = settingInt(SETTING_MATCH_THRESHOLD, 70);
+            int gap            = settingInt(SETTING_GAP, 8);
+            int count = 0;
+
+            for (int idx = 0; idx < linkIds.size(); idx++) {
+                Link orphan = orphanLinks.get(idx);
+                String[] prof = profiles.get(idx);
+                if (orphan == null || prof == null) { continue; }
+
+                try {
+                    count++;
+                    String nativeId = orphan.getNativeIdentity();
+                    String dummy = (orphan.getIdentity() != null) ? orphan.getIdentity().getName() : null;
+                    String dn = firstNonEmpty(attr(orphan, "distinguishedName"), nativeId);
+
+                    String acctEmail = prof[0], acctUpn = prof[1], acctLogin = prof[2];
+                    String acctFirst = prof[3], acctLast = prof[4], acctDisplay = prof[5];
+                    String acctEmpId = prof[6], acctDept = prof[7], acctCompany = prof[8], acctManager = prof[9];
+
+                    MatchResult result = new MatchResult();
+                    result.setNativeIdentity(nativeId);
+                    result.setApplicationName(appName);
+                    result.setDisplayName(firstNonEmpty(acctDisplay, acctLogin, nativeId));
+                    result.setDistinguishedName(dn);
+                    result.setDummyIdentityName(dummy);
+
+                    String svcKey = firstNonEmpty(acctLogin, nativeId);
+                    boolean isService = looksLikeServiceAccount(svcKey);
+                    boolean isAdmin   = looksLikeAdminAccount(svcKey);
+                    boolean isTest    = looksLikeTestAccount(svcKey);
+                    result.setTestAccount(isTest);
+
+                    // Select candidates relevant to THIS orphan from the shared pool.
+                    // Track whether any pool hit matched on a STRONG key (email/UPN,
+                    // login, or empId). Weak-only pool hits (displayName, first+last)
+                    // are not sufficient evidence that the pool covered this orphan.
+                    Map<String, Identity> cands = new LinkedHashMap<String, Identity>();
+                    boolean hasStrongCandidate = false;
+                    for (Map.Entry<String, Identity> pe : candidatePool.entrySet()) {
+                        if (cands.size() >= candLimit) { break; }
+                        Identity ci = pe.getValue();
+                        if (ci.getName().equals(dummy)) { continue; }
+                        if (!Boolean.TRUE.equals(ci.isCorrelated())) { continue; }
+                        // Include if any key matches
+                        String ciEmail = (ci.getEmail() != null) ? ci.getEmail().toLowerCase() : "";
+                        String ciName  = (ci.getName() != null) ? ci.getName().toLowerCase() : "";
+                        String ciDisplay = (ci.getDisplayName() != null) ? ci.getDisplayName().toLowerCase() : "";
+                        boolean relevant = false;
+                        boolean strongKey = false;
+                        if (!Util.isNullOrEmpty(acctEmail) && ciEmail.equalsIgnoreCase(acctEmail)) { relevant = true; strongKey = true; }
+                        if (!relevant && !Util.isNullOrEmpty(acctUpn) && ciEmail.equalsIgnoreCase(acctUpn)) { relevant = true; strongKey = true; }
+                        if (!relevant && !Util.isNullOrEmpty(acctLogin) && ciName.equalsIgnoreCase(acctLogin)) { relevant = true; strongKey = true; }
+                        if (!relevant && !Util.isNullOrEmpty(acctEmpId) && !Util.isNullOrEmpty(idEmpAttr)) {
+                            Object idVal = ci.getAttribute(idEmpAttr);
+                            if (idVal != null && idVal.toString().equalsIgnoreCase(acctEmpId)) { relevant = true; strongKey = true; }
+                        }
+                        if (!relevant && !Util.isNullOrEmpty(acctDisplay) && ciDisplay.equalsIgnoreCase(acctDisplay)) { relevant = true; }
+                        if (!relevant && !Util.isNullOrEmpty(acctFirst) && !Util.isNullOrEmpty(acctLast)) {
+                            String ciFirst = (ci.getFirstname() != null) ? ci.getFirstname().toLowerCase() : "";
+                            String ciLast  = (ci.getLastname() != null) ? ci.getLastname().toLowerCase() : "";
+                            if (ciFirst.equalsIgnoreCase(acctFirst) && ciLast.equalsIgnoreCase(acctLast)) { relevant = true; }
+                        }
+                        if (relevant) {
+                            cands.put(ci.getName(), ci);
+                            if (strongKey) { hasStrongCandidate = true; }
+                        }
+                    }
+                    // Fallback: run the thorough per-orphan query when the pool missed
+                    // this orphan entirely OR only produced weak-key hits (the pool cap
+                    // or a failed batch query may have dropped the strong candidate).
+                    // Additive: merges into cands, respecting candLimit via addCandidates.
+                    if (cands.isEmpty() || !hasStrongCandidate) {
+                        try {
+                            collectCandidates(ctx, cands, dummy, candLimit, acctEmail, acctUpn, acctLogin,
+                                    acctFirst, acctLast, acctDisplay, acctEmpId, idEmpAttr);
+                        } catch (Exception ex) {
+                            log.warn("OrphanCorrelatorResource: per-orphan candidate fallback failed for ["
+                                     + nativeId + "]. " + ex.getMessage());
+                        }
+                    }
+
+                    if (cands.isEmpty()) {
+                        result.setStrategy(isService ? MatchResult.STRATEGY_SERVICE : MatchResult.STRATEGY_SCORED);
+                        result.setScore(0);
+                        result.setMatchDetail("No candidate identity found for this account.");
+                        if (isService) { result.addWarning("Account name matches a service-account pattern."); }
+                        if (isAdmin)   { result.addWarning("Account name matches a privileged-account pattern."); }
+                        if (isTest)    { result.addWarning("Account name matches a test-account pattern."); }
+                        results.add(result);
+                        continue;
+                    }
+
+                    List<ScoreCard> cards = new ArrayList<ScoreCard>();
+                    for (Identity id : cands.values()) {
+                        cards.add(scoreCandidate(id, acctEmail, acctUpn, acctLogin, acctDisplay,
+                                acctFirst, acctLast, acctEmpId, acctDept, acctCompany, acctManager,
+                                idEmpAttr, idDeptAttr, idCompAttr, isService, isAdmin, isTest));
+                    }
+                    Collections.sort(cards, new Comparator<ScoreCard>() {
+                        public int compare(ScoreCard a, ScoreCard b) {
+                            if (b.score != a.score) { return b.score - a.score; }
+                            return ("" + a.name).compareTo("" + b.name);
+                        }
+                    });
+
+                    ScoreCard best = cards.get(0);
+                    int secondScore = (cards.size() > 1) ? cards.get(1).score : 0;
+                    result.setScore(best.score);
+                    result.setSecondScore(secondScore);
+                    result.setStrategy(MatchResult.STRATEGY_SCORED);
+                    result.setMatchedIdentityId(best.id);
+                    result.setMatchedIdentityName(best.name);
+                    result.setMatchedIdentityDisplayName(best.displayName);
+                    result.setMatchedIdentityEmail(best.email);
+                    result.setReasons(best.reasons);
+                    result.setMatchedIdentityInactive(best.inactive);
+                    result.setMatchDetail(best.reasons.isEmpty()
+                            ? ("Best score " + best.score + "/100.")
+                            : ("Best score " + best.score + "/100: " + joinCsv(best.reasons)));
+                    if (best.inactive) { result.addWarning("Matched identity is inactive - likely a leaver's account."); }
+                    if (best.cappedByFloor) { result.addWarning("Thin evidence - only weak or sparse signals available; score capped."); }
+                    if (isService) { result.addWarning("Account matches a service-account pattern (penalty applied)."); }
+                    if (isAdmin)   { result.addWarning("Account matches a privileged-account pattern (penalty applied)."); }
+                    if (isTest)    { result.addWarning("Account matches a test-account pattern (penalty applied)."); }
+                    if (cards.size() > 1 && best.score >= matchThreshold && (best.score - secondScore) < gap) {
+                        result.setAmbiguous(true);
+                        result.addWarning("Ambiguous: runner-up scored " + secondScore
+                                + " (within " + gap + " of the best). Manual review recommended.");
+                    }
+                    results.add(result);
+                } catch (Exception ex) {
+                    log.error("OrphanCorrelatorResource: error processing link ["
+                            + (orphan != null ? orphan.getNativeIdentity() : linkIds.get(idx)) + "].", ex);
                     MatchResult errResult = new MatchResult();
                     if (orphan != null) {
                         errResult.setNativeIdentity(orphan.getNativeIdentity());
@@ -303,11 +560,14 @@ public class OrphanCorrelatorResource extends BasePluginResource {
                     errResult.setErrorMessage("Processing error - see server logs.");
                     results.add(errResult);
                 } finally {
-                    // Safe here - no open search cursor. Clears the orphan link and
-                    // every candidate identity loaded while matching this row.
-                    try { ctx.decache(); } catch (Exception ignore) {}
+                    // Single-object decache of the orphan Link only: the shared
+                    // candidatePool identities must stay attached for later orphans,
+                    // so a full-session decache here would be wrong.
+                    try { ctx.decache(orphan); } catch (Exception ignore) {}
                 }
             }
+            // Decache the entire batch after processing — no open cursors at this point.
+            try { ctx.decache(); } catch (Exception ignore) {}
 
             int returned = linkIds.size();
             boolean hasMore = (offset + returned) < total;
@@ -728,9 +988,11 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         String strategy       = body.get("strategy");
         String scoreStr       = body.get("score");
         String matchDetail    = body.get("matchDetail");
+        String approvalTarget = body.get("approvalTarget");
 
         log.info("OrphanCorrelatorResource: requestApproval() called for nativeIdentity=["
-                 + nativeIdentity + "] identityName=[" + identityName + "]");
+                 + nativeIdentity + "] identityName=[" + identityName
+                 + "] approvalTarget=[" + approvalTarget + "]");
 
         if (Util.isNullOrEmpty(nativeIdentity) || Util.isNullOrEmpty(appName)
                 || Util.isNullOrEmpty(identityName)) {
@@ -743,7 +1005,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         try {
             SailPointContext ctx = getContext();
             Map<String, Object> r = requestApprovalOne(ctx, nativeIdentity, appName,
-                    identityName, strategy, scoreStr, matchDetail, resolveAdminUser(ctx));
+                    identityName, strategy, scoreStr, matchDetail, resolveAdminUser(ctx), approvalTarget);
             String st = (String) r.get("status");
             if ("conflict".equals(st)) {
                 return Response.status(Response.Status.CONFLICT).entity(r)
@@ -796,7 +1058,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
                 Map<String, Object> r = requestApprovalOne(ctx,
                         it.get("nativeIdentity"), it.get("applicationName"),
                         it.get("identityName"), it.get("strategy"),
-                        it.get("score"), it.get("matchDetail"), adminUser);
+                        it.get("score"), it.get("matchDetail"), adminUser, it.get("approvalTarget"));
                 if ("approval_requested".equals(r.get("status"))) { ok++; } else { failed++; }
                 results.add(r);
             }
@@ -820,7 +1082,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
      */
     private Map<String, Object> requestApprovalOne(SailPointContext ctx, String nativeIdentity,
             String appName, String identityName, String strategy, String scoreStr,
-            String matchDetail, String adminUser) {
+            String matchDetail, String adminUser, String approvalTarget) {
         Map<String, Object> r = new HashMap<String, Object>();
         r.put("nativeIdentity", nativeIdentity);
         r.put("identityName",   identityName);
@@ -841,6 +1103,20 @@ public class OrphanCorrelatorResource extends BasePluginResource {
             if (reqAuthoritative) {
                 r.put("status", "error");
                 r.put("error", "Cannot request approval on authoritative application [" + appName + "].");
+                return r;
+            }
+
+            // Block self-approval on the identity path: if the confirmation work
+            // item would be owned by the requesting admin's own identity, the
+            // requester would be approving their own request.
+            if (("identity".equals(approvalTarget) || "both".equals(approvalTarget))
+                    && identityName.equals(adminUser)) {
+                log.warn("OrphanCorrelatorResource: self-approval blocked - requester [" + adminUser
+                         + "] attempted to send an ownership confirmation to their own identity ["
+                         + identityName + "].");
+                r.put("status", "error");
+                r.put("error", "You cannot send an ownership confirmation to your own identity. "
+                        + "Choose 'Manager only' or have another administrator submit the request.");
                 return r;
             }
 
@@ -897,6 +1173,11 @@ public class OrphanCorrelatorResource extends BasePluginResource {
             launchArgs.put("orcScore",            serverScore);
             launchArgs.put("orcMatchDetail",      matchDetail != null ? matchDetail : "");
             launchArgs.put("orcRequestedBy",      adminUser);
+            String safeTarget = "manager";
+            if ("identity".equals(approvalTarget) || "both".equals(approvalTarget)) {
+                safeTarget = approvalTarget;
+            }
+            launchArgs.put("orcApprovalTarget",  safeTarget);
 
             WorkflowLaunch wfLaunch = new WorkflowLaunch();
             wfLaunch.setWorkflowName(wf.getName());
@@ -925,6 +1206,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
             log.info("OrphanCorrelatorResource: approval launched for [" + nativeIdentity
                      + "]. Manager=[" + managerName + "] TaskResult=[" + taskResultId + "]");
             r.put("status",        "approval_requested");
+            r.put("approvalTarget", safeTarget);
             r.put("managerName",   managerName);
             r.put("managerDisplay", managerDisplay);
             r.put("taskResultId",  taskResultId);
@@ -1045,10 +1327,14 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         result.setMatchedIdentityDisplayName(best.displayName);
         result.setMatchedIdentityEmail(best.email);
         result.setReasons(best.reasons);
+        result.setMatchedIdentityInactive(best.inactive);
         result.setMatchDetail(best.reasons.isEmpty()
                 ? ("Best score " + best.score + "/100.")
                 : ("Best score " + best.score + "/100: " + joinCsv(best.reasons)));
 
+        if (best.inactive) {
+            result.addWarning("Matched identity is inactive - likely a leaver's account.");
+        }
         if (best.cappedByFloor) {
             result.addWarning("Thin evidence - only weak or sparse signals available; score capped.");
         }
@@ -1117,6 +1403,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         String id, name, displayName, email;
         int score;
         boolean cappedByFloor;
+        boolean inactive;   // matched identity is inactive (flag, not a score penalty)
         List<String> reasons = new ArrayList<String>();
     }
 
@@ -1136,23 +1423,38 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         double earned = 0, available = 0, penalty = 0, usernameEarned = 0;
         boolean strong = false;
 
-        // Employee ID (30) - exact only. Missing = neutral; wrong = dangerous.
+        // Employee ID (30) - exact first; formatting-tolerant second (leading
+        // zeros / separators stripped). The -40 conflict penalty applies ONLY
+        // when the digits-normalized values genuinely differ.
         String idEmp = (idEmpAttr != null) ? idAttr(id, idEmpAttr) : null;
+        double empIdEarned = 0;
         if (!Util.isNullOrEmpty(acctEmpId) && !Util.isNullOrEmpty(idEmp)) {
             available += 30;
             if (StringMatch.normId(acctEmpId).equals(StringMatch.normId(idEmp))) {
-                earned += 30; strong = true; sc.reasons.add("Employee ID exact match");
+                earned += 30; empIdEarned = 30; strong = true; sc.reasons.add("Employee ID exact match");
             } else {
-                penalty += 40; sc.reasons.add("Employee ID present but DIFFERENT (heavy penalty)");
+                String digitsA = acctEmpId.replaceAll("[^0-9]", "").replaceFirst("^0+", "");
+                String digitsB = idEmp.replaceAll("[^0-9]", "").replaceFirst("^0+", "");
+                if (!digitsA.isEmpty() && digitsA.equals(digitsB)) {
+                    // Same number, different formatting ("00123" vs "EMP-123").
+                    earned += 25; empIdEarned = 25; strong = true;
+                    sc.reasons.add("Employee ID match (formatting differs)");
+                } else if (!digitsA.isEmpty() && !digitsB.isEmpty()) {
+                    penalty += 40; sc.reasons.add("Employee ID present but DIFFERENT (heavy penalty)");
+                }
+                // One side has no digits at all: neither a match nor a provable
+                // conflict - treat as neutral (no points, no penalty).
             }
         }
 
         // Email / UPN (25)
         String idEmail = id.getEmail();
+        double emailEarned = 0;
         if ((!Util.isNullOrEmpty(acctEmail) || !Util.isNullOrEmpty(acctUpn)) && !Util.isNullOrEmpty(idEmail)) {
             available += 25;
             double e = emailScore(acctEmail, acctUpn, idEmail, sc);
             earned += e;
+            emailEarned = e;
             if (e >= 20) { strong = true; }
         }
 
@@ -1168,17 +1470,21 @@ public class OrphanCorrelatorResource extends BasePluginResource {
 
         // Display name (15)
         String idDisplay = id.getDisplayName();
+        double displayEarned = 0;
         if (!Util.isNullOrEmpty(acctDisplay) && !Util.isNullOrEmpty(idDisplay)) {
             available += 15;
-            earned += displayScore(acctDisplay, idDisplay, id.getFirstname(), id.getLastname(), sc);
+            displayEarned = displayScore(acctDisplay, idDisplay, id.getFirstname(), id.getLastname(), sc);
+            earned += displayEarned;
         }
 
         // First + last (5)
         boolean acctHasName = !Util.isNullOrEmpty(acctFirst) || !Util.isNullOrEmpty(acctLast);
         boolean idHasName   = !Util.isNullOrEmpty(id.getFirstname()) || !Util.isNullOrEmpty(id.getLastname());
+        double firstLastEarned = 0;
         if (acctHasName && idHasName) {
             available += 5;
-            earned += firstLastScore(acctFirst, acctLast, id.getFirstname(), id.getLastname(), sc);
+            firstLastEarned = firstLastScore(acctFirst, acctLast, id.getFirstname(), id.getLastname(), sc);
+            earned += firstLastEarned;
         }
 
         // Organisation (5) - supporting signal only
@@ -1190,27 +1496,34 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         // Each org field contributes to availableWeight ONLY when both sides have
         // that specific field - so an account with a department isn't penalised
         // because the identity only records a manager.
+        double orgEarned = 0;
         if (!Util.isNullOrEmpty(acctManager) && !Util.isNullOrEmpty(idMgr)) {
             available += 2;
             if (StringMatch.normName(acctManager).equals(StringMatch.normName(idMgr))) {
-                earned += 2; sc.reasons.add("Same manager");
+                earned += 2; orgEarned += 2; sc.reasons.add("Same manager");
             }
         }
         if (!Util.isNullOrEmpty(acctDept) && !Util.isNullOrEmpty(idDept)) {
             available += 2;
             if (StringMatch.normName(acctDept).equals(StringMatch.normName(idDept))) {
-                earned += 2; sc.reasons.add("Same department");
+                earned += 2; orgEarned += 2; sc.reasons.add("Same department");
             }
         }
         if (!Util.isNullOrEmpty(acctCompany) && !Util.isNullOrEmpty(idComp)) {
             available += 1;
             if (StringMatch.normName(acctCompany).equals(StringMatch.normName(idComp))) {
-                earned += 1; sc.reasons.add("Same company");
+                earned += 1; orgEarned += 1; sc.reasons.add("Same company");
             }
         }
 
+        // Inactive is a FLAG, not a penalty: the account may legitimately belong
+        // to a leaver, and that is precisely what the reviewer must see.
+        if (id.isInactive()) {
+            sc.inactive = true;
+            sc.reasons.add("Identity is inactive - likely a leaver's account");
+        }
+
         // Penalties
-        if (id.isInactive()) { penalty += 30; sc.reasons.add("Identity is inactive/terminated (penalty)"); }
         if (isService) { penalty += 25; }
         if (isAdmin)   { penalty += 20; }
         if (isTest)    { penalty += 15; }   // lighter than service - a test account may map to a real person
@@ -1220,18 +1533,46 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         double base = (available > 0) ? (earned / available * 100.0) : 0.0;
         double finalScore = base - penalty;
 
-        // Thin-evidence floor: no strong identifier AND sparse signals -> cap at LOW.
-        if (!strong && available < 40 && finalScore > 79) {
-            finalScore = 79; sc.cappedByFloor = true;
+        // Thin-evidence floor: no strong identifier AND sparse signals -> cap
+        // just below the configured match threshold, so thin matches can never
+        // clear the auto-correlate bar regardless of how the threshold is tuned.
+        int thinCap = settingInt(SETTING_MATCH_THRESHOLD, 70) - 5;
+        if (thinCap < 0) { thinCap = 0; }
+        if (!strong && available < 40 && finalScore > thinCap) {
+            finalScore = thinCap; sc.cappedByFloor = true;
         }
         // Username-only match (decision 1c): an exact username is "strong" enough
         // to skip the floor, but a normalized-username match with NOTHING else
         // corroborating is too collision-prone for VERY_HIGH - cap it at HIGH (94).
-        boolean corroborated = (earned - usernameEarned) > 0.0;
+        // jsmith double-counting: when the email local-part IS the login (normalized
+        // equal), email and username are the SAME underlying string - they do not
+        // corroborate each other independently.
+        boolean emailIsLogin = !Util.isNullOrEmpty(acctLogin)
+                && StringMatch.normLogin(firstNonEmpty(acctEmail, acctUpn)).equals(StringMatch.normLogin(acctLogin))
+                && !StringMatch.normLogin(firstNonEmpty(acctEmail, acctUpn)).isEmpty();
+        double corroboratingEarned = earned - usernameEarned - (emailIsLogin ? emailEarned : 0.0);
+        boolean corroborated = corroboratingEarned > 0.0;
         if (usernameEarned >= 20 && !corroborated && finalScore > 94) {
             finalScore = 94;
             sc.reasons.add("Username-only match - capped at HIGH (no corroborating signal)");
         }
+
+        // Single-signal cap: if only ONE signal category earned points, the
+        // match rests on a single piece of evidence - cap below VERY_HIGH.
+        int signalCategories = 0;
+        if (empIdEarned     > 0) { signalCategories++; }
+        if (emailEarned     > 0) { signalCategories++; }
+        if (usernameEarned  > 0) { signalCategories++; }
+        if (displayEarned   > 0) { signalCategories++; }
+        if (firstLastEarned > 0) { signalCategories++; }
+        if (orgEarned       > 0) { signalCategories++; }
+        // Email-is-login means email + username are one signal for this count too.
+        if (emailIsLogin && emailEarned > 0 && usernameEarned > 0) { signalCategories--; }
+        if (signalCategories == 1 && finalScore > 94) {
+            finalScore = 94;
+            sc.reasons.add("Single-signal match - capped");
+        }
+
         if (finalScore > 100) { finalScore = 100; }
         if (finalScore < 0)   { finalScore = 0; }
 
@@ -1294,8 +1635,11 @@ public class OrphanCorrelatorResource extends BasePluginResource {
 
     /** First/last-name signal (max 5), supporting evidence only. */
     private double firstLastScore(String af, String al, String idf, String idl, ScoreCard sc) {
+        // First-name equality accepts exact (normName) OR nickname-canonical
+        // equality ("Bob" vs "Robert" via canonicalFirstName).
         boolean fMatch = !Util.isNullOrEmpty(af) && !Util.isNullOrEmpty(idf)
-                && StringMatch.normName(af).equals(StringMatch.normName(idf));
+                && (StringMatch.normName(af).equals(StringMatch.normName(idf))
+                    || StringMatch.canonicalFirstName(af).equals(StringMatch.canonicalFirstName(idf)));
         boolean lMatch = !Util.isNullOrEmpty(al) && !Util.isNullOrEmpty(idl)
                 && StringMatch.normName(al).equals(StringMatch.normName(idl));
         if (fMatch && lMatch) { sc.reasons.add("First + last name match"); return 5; }
@@ -1380,6 +1724,35 @@ public class OrphanCorrelatorResource extends BasePluginResource {
         if (dummy != null) { qo.addFilter(Filter.ne("name", dummy)); }
         qo.setResultLimit(limit);
         return ctx.getObjects(Identity.class, qo);
+    }
+
+    /**
+     * Batch-query correlated identities by a single attribute using Filter.in().
+     * Splits into chunks of 50 to avoid oversized IN clauses. Adds results to
+     * the shared candidatePool, deduped by identity name.
+     */
+    private void batchQueryIdentities(SailPointContext ctx, Map<String, Identity> pool,
+            String attr, List<String> values, int maxTotal) throws GeneralException {
+        if (values == null || values.isEmpty()) { return; }
+        int CHUNK = 50;
+        for (int i = 0; i < values.size() && pool.size() < maxTotal; i += CHUNK) {
+            List<String> chunk = values.subList(i, Math.min(i + CHUNK, values.size()));
+            QueryOptions qo = new QueryOptions();
+            qo.addFilter(Filter.ignoreCase(Filter.in(attr, chunk)));
+            qo.addFilter(Filter.eq("correlated", new Boolean(true)));
+            // CHUNK*3 headroom absorbs duplicate-attribute identities; deterministic
+            // ordering makes which candidates survive the cap stable across requests.
+            qo.setResultLimit(Math.min(CHUNK * 3, maxTotal - pool.size()));
+            qo.addOrdering("name", true);
+            List<Identity> found = ctx.getObjects(Identity.class, qo);
+            if (found != null) {
+                for (Identity id : found) {
+                    if (id != null && id.getName() != null && !pool.containsKey(id.getName())) {
+                        pool.put(id.getName(), id);
+                    }
+                }
+            }
+        }
     }
 
     /** Null-safe read of a Link attribute as a String. */
@@ -1589,6 +1962,7 @@ public class OrphanCorrelatorResource extends BasePluginResource {
             m.put("warnings",                  r.getWarnings());
             m.put("approvalPending",           Boolean.valueOf(r.isApprovalPending()));
             m.put("testAccount",               Boolean.valueOf(r.isTestAccount()));
+            m.put("matchedIdentityInactive",   Boolean.valueOf(r.isMatchedIdentityInactive()));
             m.put("errorMessage",              r.getErrorMessage());
             list.add(m);
         }

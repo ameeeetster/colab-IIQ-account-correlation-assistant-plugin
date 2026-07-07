@@ -4,7 +4,7 @@
         displayName="Orphan Account Correlator"
         minSystemVersion="8.1"
         name="OrphanCorrelator"
-        version="1.0.0">
+        version="2.0.0">
   <Attributes>
     <Map>
       <entry key="minUpgradableVersion" value="1.0"/>
